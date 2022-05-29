@@ -5,4 +5,5 @@
 !test.cpp
 !tests/
 !README.md
+!LICENSE
 !static_link_ver/
