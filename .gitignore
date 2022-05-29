@@ -1,0 +1,8 @@
+/*
+!.gitignore
+!.gitmodules
+!JsonParser.hpp
+!test.cpp
+!tests/
+!README.md
+!static_link_ver/
