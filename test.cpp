@@ -12,6 +12,7 @@ std::string loadFromFile(const std::string &filename)
 
 int main()
 {
+    JsonParser parser;
     JsonNode json;
     std::string dir = "tests/JSONTestSuite/test_parsing/";
     for (const auto &dirEntry : std::filesystem::directory_iterator(dir))
@@ -22,7 +23,7 @@ int main()
         std::string filename = dir + ss.str().substr(dir.size() + 1, ss.str().size() - dir.size() - 2);
         try
         {
-            json = JsonParser::parse(loadFromFile(filename));
+            json = parser.parse(loadFromFile(filename));
         }
         catch (const JsonParseExcept &e)
         {

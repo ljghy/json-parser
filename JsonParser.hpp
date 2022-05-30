@@ -71,29 +71,23 @@ private:
     std::string m_whatStr;
     JsonParseErrCode m_code;
     size_t m_pos;
+    size_t m_line; // start from 1
+    size_t m_col;  // start from 1
 
 public:
     JsonParseExcept(const JsonParseErrCode &err,
-                    const std::string::const_iterator &pos,
-                    const std::string &buf)
-        : m_code(err), m_pos(pos - buf.begin())
+                    size_t pos, size_t line, size_t col)
+        : m_code(err), m_pos(pos), m_line(line), m_col(col)
     {
-        m_whatStr = JsonParseErrMsg[static_cast<size_t>(err)];
-        size_t p = 0, lineCount = 0;
-        std::istringstream iss(buf);
-        std::string line;
-        while (p + buf.begin() < pos)
-        {
-            std::getline(iss, line);
-            p += line.size() + 1;
-            ++lineCount;
-        }
-        m_whatStr += " at line " + std::to_string(lineCount) + ':' + std::to_string((pos + line.size() + 2 - (p + buf.begin())));
+        m_whatStr = JsonParseErrMsg[static_cast<size_t>(err)] +
+                    " at line " + std::to_string(m_line) + ':' + std::to_string(m_col);
     }
 
     const char *what() const throw() { return m_whatStr.c_str(); }
     JsonParseErrCode code() const throw() { return m_code; }
     size_t pos() const throw() { return m_pos; }
+    size_t line() const throw() { return m_line; }
+    size_t col() const throw() { return m_col; }
 };
 
 class JsonNode;
@@ -495,208 +489,194 @@ static inline std::shared_ptr<JsonNode> jsptr(const std::initializer_list<std::p
 class JsonParser
 {
 private:
-    JsonParser() = default;
+    std::string m_buffer;
+    std::string::const_iterator m_pos;
+    size_t m_line;
+    int64_t m_lineLen;
 
-    static JsonNode _parseValue(std::string::const_iterator &,
-                                const std::string &,
-                                uint16_t);
+private:
+    JsonNode _parseValue(uint16_t);
 
-    static JsonNode _parseLiteral(std::string::const_iterator &,
-                                  const std::string &);
+    JsonNode _parseLiteral();
 
-    static JsonStr_t _parseString(std::string::const_iterator &,
-                                  const std::string &);
+    JsonStr_t _parseString();
 
-    static JsonNode _parseNumber(std::string::const_iterator &,
-                                 const std::string &);
+    JsonNode _parseNumber();
 
-    static JsonNode _parseArray(std::string::const_iterator &,
-                                const std::string &,
-                                uint16_t);
+    JsonNode _parseArray(uint16_t);
 
-    static JsonNode _parseObject(std::string::const_iterator &,
-                                 const std::string &,
-                                 uint16_t);
+    JsonNode _parseObject(uint16_t);
 
-    static void _skipSpace(std::string::const_iterator &,
-                           const std::string &);
+    void _skipSpace();
 
-    static void _parseEscapeSequence(std::string &,
-                                     std::string::const_iterator &,
-                                     const std::string &);
-    static void _parseUTF8(std::string &,
-                           std::string::const_iterator &,
-                           const std::string &);
-    static uint64_t _parseHex4(std::string::const_iterator &,
-                               const std::string &);
-    static void _encodeUTF8(std::string &, uint64_t u);
+    void _parseEscapeSequence(std::string &);
+    void _parseUTF8(std::string &);
+    uint64_t _parseHex4();
+    void _encodeUTF8(std::string &, uint64_t u);
 
-    static std::pair<JsonStr_t, std::shared_ptr<JsonNode>>
-    _parseKeyValue(std::string::const_iterator &,
-                   const std::string &,
-                   uint16_t);
+    std::pair<JsonStr_t, std::shared_ptr<JsonNode>>
+        _parseKeyValue(uint16_t);
+
+    size_t _pos() const { return static_cast<size_t>(m_pos - m_buffer.begin()); }
+    size_t _col() const { return _pos() - m_lineLen; }
 
 public:
-    static JsonNode parse(const std::string &);
+    JsonParser() = default;
+    JsonParser(const JsonParser &) = delete;
+    JsonParser &operator=(const JsonParser &) = delete;
+
+    JsonNode parse(const std::string_view);
 };
 
-inline JsonNode JsonParser::parse(const std::string &buffer)
+inline JsonNode JsonParser::parse(const std::string_view buffer_view)
 {
-    auto pos = buffer.begin();
-    JsonNode ret = _parseValue(pos, buffer, 0);
+    m_buffer = std::string(buffer_view.data(), buffer_view.size());
+    m_pos = m_buffer.begin();
+    m_line = 1;
+    m_lineLen = -1;
+
+    JsonNode ret = _parseValue(0);
     if (ret.isEmpty())
-    {
-        throw JsonParseExcept(JSON_EMPTY_BUFFER, pos, buffer);
-    }
-    if (pos != buffer.end())
-    {
-        throw JsonParseExcept(JSON_ROOT_NOT_SINGLE_VALUE, pos, buffer);
-    }
+        throw JsonParseExcept(JSON_EMPTY_BUFFER, _pos(), m_line, _col());
+    if (m_pos != m_buffer.end())
+        throw JsonParseExcept(JSON_ROOT_NOT_SINGLE_VALUE, _pos(), m_line, _col());
     return ret;
 }
 
-inline JsonNode JsonParser::_parseValue(std::string::const_iterator &pos,
-                                        const std::string &buf,
-                                        uint16_t depth)
+inline JsonNode JsonParser::_parseValue(uint16_t depth)
 {
     if (depth >= JSON_MAX_DEPTH)
-        throw JsonParseExcept(JSON_TOO_DEEP, pos, buf);
-    _skipSpace(pos, buf);
+        throw JsonParseExcept(JSON_TOO_DEEP, _pos(), m_line, _col());
+    _skipSpace();
     JsonNode ret = JsonEmpty_t();
-    if (pos == buf.end())
+    if (m_pos == m_buffer.end())
         return ret;
 
-    switch (*pos)
+    switch (*m_pos)
     {
     case 'n':
     case 't':
     case 'f':
-        ret = _parseLiteral(pos, buf);
+        ret = _parseLiteral();
         break;
     case '"':
-        ret = _parseString(pos, buf);
+        ret = _parseString();
         break;
     case '[':
-        ret = _parseArray(pos, buf, depth);
+        ret = _parseArray(depth);
         break;
     case '{':
-        ret = _parseObject(pos, buf, depth);
+        ret = _parseObject(depth);
         break;
     default:
-        if (std::isdigit(*pos) || (*pos == '-'))
-            ret = _parseNumber(pos, buf);
+        if (std::isdigit(*m_pos) || (*m_pos == '-'))
+            ret = _parseNumber();
         else
-            throw JsonParseExcept(JSON_INVALID_VALUE, pos, buf);
+            throw JsonParseExcept(JSON_INVALID_VALUE, _pos(), m_line, _col());
         break;
     }
-    _skipSpace(pos, buf);
+    _skipSpace();
     return ret;
 }
 
 inline std::pair<JsonStr_t, std::shared_ptr<JsonNode>>
-JsonParser::_parseKeyValue(std::string::const_iterator &pos,
-                           const std::string &buf,
-                           uint16_t depth)
+JsonParser::_parseKeyValue(uint16_t depth)
 {
-    _skipSpace(pos, buf);
-    if (pos == buf.end() || *pos != '"')
+    _skipSpace();
+    if (m_pos == m_buffer.end() || *m_pos != '"')
     {
-        if (*pos == '}')
+        if (*m_pos == '}')
             return {"", std::make_shared<JsonNode>(JsonEmpty_t())};
-        throw JsonParseExcept(JSON_INVALID_KEY_VALUE_PAIR, pos, buf);
+        throw JsonParseExcept(JSON_INVALID_KEY_VALUE_PAIR, _pos(), m_line, _col());
     }
 
-    JsonStr_t key = _parseString(pos, buf);
-    _skipSpace(pos, buf);
-    if (pos == buf.end() || *pos != ':')
+    JsonStr_t key = _parseString();
+    _skipSpace();
+    if (m_pos == m_buffer.end() || *m_pos != ':')
     {
-        throw JsonParseExcept(JSON_INVALID_KEY_VALUE_PAIR, pos, buf);
+        throw JsonParseExcept(JSON_INVALID_KEY_VALUE_PAIR, _pos(), m_line, _col());
     }
-    ++pos;
-    JsonNode node = _parseValue(pos, buf, depth + 1);
+    ++m_pos;
+    JsonNode node = _parseValue(depth + 1);
     return {key, std::make_shared<JsonNode>(node)};
 }
 
-inline JsonNode JsonParser::_parseObject(std::string::const_iterator &pos,
-                                         const std::string &buf,
-                                         uint16_t depth)
+inline JsonNode JsonParser::_parseObject(uint16_t depth)
 {
-    assert((pos != buf.end()) && (*pos == '{'));
-    ++pos;
+    assert((m_pos != m_buffer.end()) && (*m_pos == '{'));
+    ++m_pos;
     JsonObj_t obj;
 
-    while (pos != buf.end())
+    while (m_pos != m_buffer.end())
     {
-        auto keyValue = _parseKeyValue(pos, buf, depth);
-        if (pos == buf.end())
+        auto keyValue = _parseKeyValue(depth);
+        if (m_pos == m_buffer.end())
         {
-            throw JsonParseExcept(JSON_MISS_COMMA_OR_CURLY_BRACKET, pos, buf);
+            throw JsonParseExcept(JSON_MISS_COMMA_OR_CURLY_BRACKET, _pos(), m_line, _col());
         }
         if (keyValue.second->isEmpty())
         {
-            if (*pos == '}' && obj.empty())
+            if (*m_pos == '}' && obj.empty())
             {
-                ++pos;
+                ++m_pos;
                 return obj;
             }
-            if (*pos == '}')
-                throw JsonParseExcept(JSON_TRAILING_COMMA, pos, buf);
-            throw JsonParseExcept(JSON_MISS_VALUE, pos, buf);
+            if (*m_pos == '}')
+                throw JsonParseExcept(JSON_TRAILING_COMMA, _pos(), m_line, _col());
+            throw JsonParseExcept(JSON_MISS_VALUE, _pos(), m_line, _col());
         }
         obj.insert(keyValue);
-        if (*pos == '}')
+        if (*m_pos == '}')
         {
-            ++pos;
+            ++m_pos;
             return obj;
         }
-        if (*pos == ',')
-            ++pos;
+        if (*m_pos == ',')
+            ++m_pos;
         else
         {
-            throw JsonParseExcept(JSON_MISS_COMMA_OR_CURLY_BRACKET, pos, buf);
+            throw JsonParseExcept(JSON_MISS_COMMA_OR_CURLY_BRACKET, _pos(), m_line, _col());
         }
     }
-    throw JsonParseExcept(JSON_MISS_COMMA_OR_CURLY_BRACKET, pos, buf);
+    throw JsonParseExcept(JSON_MISS_COMMA_OR_CURLY_BRACKET, _pos(), m_line, _col());
 }
 
-inline JsonNode JsonParser::_parseArray(std::string::const_iterator &pos,
-                                        const std::string &buf,
-                                        uint16_t depth)
+inline JsonNode JsonParser::_parseArray(uint16_t depth)
 {
-    assert((pos != buf.end()) && (*pos == '['));
-    ++pos;
+    assert((m_pos != m_buffer.end()) && (*m_pos == '['));
+    ++m_pos;
     JsonArr_t arr;
 
-    while (pos != buf.end())
+    while (m_pos != m_buffer.end())
     {
-        _skipSpace(pos, buf);
-        if (pos == buf.end())
-            throw JsonParseExcept(JSON_MISS_COMMA_OR_SQUARE_BRACKET, pos, buf);
-        if (*pos == ']')
+        _skipSpace();
+        if (m_pos == m_buffer.end())
+            throw JsonParseExcept(JSON_MISS_COMMA_OR_SQUARE_BRACKET, _pos(), m_line, _col());
+        if (*m_pos == ']')
         {
-            ++pos;
+            ++m_pos;
             if (!arr.empty())
-                throw JsonParseExcept(JSON_TRAILING_COMMA, pos, buf);
+                throw JsonParseExcept(JSON_TRAILING_COMMA, _pos(), m_line, _col());
             return arr;
         }
-        JsonNode node = _parseValue(pos, buf, depth + 1);
-        if (pos == buf.end())
-            throw JsonParseExcept(JSON_MISS_COMMA_OR_SQUARE_BRACKET, pos, buf);
+        JsonNode node = _parseValue(depth + 1);
+        if (m_pos == m_buffer.end())
+            throw JsonParseExcept(JSON_MISS_COMMA_OR_SQUARE_BRACKET, _pos(), m_line, _col());
 
         arr.push_back(std::make_shared<JsonNode>(node));
-        if (*pos == ']')
+        if (*m_pos == ']')
         {
-            ++pos;
+            ++m_pos;
             return arr;
         }
-        if (*pos == ',')
-            ++pos;
+        if (*m_pos == ',')
+            ++m_pos;
         else
         {
-            throw JsonParseExcept(JSON_MISS_COMMA_OR_SQUARE_BRACKET, pos, buf);
+            throw JsonParseExcept(JSON_MISS_COMMA_OR_SQUARE_BRACKET, _pos(), m_line, _col());
         }
     }
-    throw JsonParseExcept(JSON_MISS_COMMA_OR_SQUARE_BRACKET, pos, buf);
+    throw JsonParseExcept(JSON_MISS_COMMA_OR_SQUARE_BRACKET, _pos(), m_line, _col());
 }
 
 inline void JsonParser::_encodeUTF8(std::string &dest, uint64_t u)
@@ -723,111 +703,105 @@ inline void JsonParser::_encodeUTF8(std::string &dest, uint64_t u)
     }
 }
 
-inline uint64_t JsonParser::_parseHex4(
-    std::string::const_iterator &pos,
-    const std::string &buf)
+inline uint64_t JsonParser::_parseHex4()
 {
-    assert(pos != buf.end());
+    assert(m_pos != m_buffer.end());
     uint64_t u = 0;
-    auto p = pos;
-    for (; pos != buf.end() && pos < p + 4; ++pos)
+    auto p = m_pos;
+    for (; m_pos != m_buffer.end() && m_pos < p + 4; ++m_pos)
     {
-        if (pos == buf.end())
+        if (m_pos == m_buffer.end())
         {
-            throw JsonParseExcept(JSON_UNEXPECTED_END_OF_STRING, pos, buf);
+            throw JsonParseExcept(JSON_UNEXPECTED_END_OF_STRING, _pos(), m_line, _col());
         }
         u <<= 4;
-        if (*pos >= '0' && *pos <= '9')
-            u |= *pos - '0';
-        else if (*pos >= 'A' && *pos <= 'F')
-            u |= *pos - 'A' + 10;
-        else if (*pos >= 'a' && *pos <= 'f')
-            u |= *pos - 'a' + 10;
+        if (*m_pos >= '0' && *m_pos <= '9')
+            u |= *m_pos - '0';
+        else if (*m_pos >= 'A' && *m_pos <= 'F')
+            u |= *m_pos - 'A' + 10;
+        else if (*m_pos >= 'a' && *m_pos <= 'f')
+            u |= *m_pos - 'a' + 10;
         else
         {
-            throw JsonParseExcept(JSON_INVALID_UNICODE_HEX, pos, buf);
+            throw JsonParseExcept(JSON_INVALID_UNICODE_HEX, _pos(), m_line, _col());
         }
     }
     return u;
 }
 
-inline void JsonParser::_parseEscapeSequence(std::string &dest,
-                                             std::string::const_iterator &pos,
-                                             const std::string &buf)
+inline void JsonParser::_parseEscapeSequence(std::string &dest)
 {
-    assert((pos != buf.end()) && (*pos == '\\'));
-    ++pos;
-    if (pos == buf.end())
+    assert((m_pos != m_buffer.end()) && (*m_pos == '\\'));
+    ++m_pos;
+    if (m_pos == m_buffer.end())
     {
-        throw JsonParseExcept(JSON_UNEXPECTED_END_OF_STRING, pos, buf);
+        throw JsonParseExcept(JSON_UNEXPECTED_END_OF_STRING, _pos(), m_line, _col());
     }
-    switch (*pos)
+    switch (*m_pos)
     {
     case '"':
     case '\\':
     case '/':
-        dest.push_back(*pos);
-        ++pos;
+        dest.push_back(*m_pos);
+        ++m_pos;
         break;
     case 'b':
         dest.push_back('\b');
-        ++pos;
+        ++m_pos;
         break;
     case 'f':
         dest.push_back('\f');
-        ++pos;
+        ++m_pos;
         break;
     case 'n':
         dest.push_back('\n');
-        ++pos;
+        ++m_pos;
         break;
     case 'r':
         dest.push_back('\r');
-        ++pos;
+        ++m_pos;
         break;
     case 't':
         dest.push_back('\t');
-        ++pos;
+        ++m_pos;
         break;
     case 'u':
     {
-        ++pos;
-        uint64_t u = _parseHex4(pos, buf);
+        ++m_pos;
+        uint64_t u = _parseHex4();
         if (u >= 0xD800 && u <= 0xDBFF)
         {
-            if (*pos != '\\' ||
-                *(pos + 1) != 'u')
+            if (*m_pos != '\\' ||
+                *(m_pos + 1) != 'u')
             {
-                throw JsonParseExcept(JSON_INVALID_UNICODE_SURROGATE, pos, buf);
+                throw JsonParseExcept(JSON_INVALID_UNICODE_SURROGATE, _pos(), m_line, _col());
             }
-            pos += 2;
-            uint64_t l = _parseHex4(pos, buf);
+            m_pos += 2;
+            uint64_t l = _parseHex4();
             if (l < 0xDC00 || l > 0xDFFF)
             {
-                throw JsonParseExcept(JSON_INVALID_UNICODE_SURROGATE, pos, buf);
+                throw JsonParseExcept(JSON_INVALID_UNICODE_SURROGATE, _pos(), m_line, _col());
             }
             u = (((u - 0xD800) << 10) | (l - 0xDC00)) +
                 0x10000;
         }
         else if (u > 0xDBFF && u <= 0xDFFF)
         {
-            throw JsonParseExcept(JSON_INVALID_UNICODE_SURROGATE, pos, buf);
+            throw JsonParseExcept(JSON_INVALID_UNICODE_SURROGATE, _pos(), m_line, _col());
         }
         _encodeUTF8(dest, u);
     }
     break;
     default:
-        throw JsonParseExcept(JSON_INVALID_STRING_ESCAPE_SEQUENCE, pos, buf);
+        throw JsonParseExcept(JSON_INVALID_STRING_ESCAPE_SEQUENCE, _pos(), m_line, _col());
         ;
     }
 }
 
-inline void JsonParser::_parseUTF8(std::string &dest,
-                                   std::string::const_iterator &pos,
-                                   const std::string &buf)
+inline void JsonParser::_parseUTF8(std::string &dest)
 {
-    assert(pos != buf.end());
-    uint8_t u = static_cast<uint8_t>(*pos), byteCount = 0;
+    assert(m_pos != m_buffer.end());
+    uint8_t u = static_cast<uint8_t>(*m_pos), byteCount = 0;
     if ((u <= 0x7F))
         byteCount = 1;
     else if ((u >= 0xC0) && (u <= 0xDF))
@@ -837,54 +811,52 @@ inline void JsonParser::_parseUTF8(std::string &dest,
     else if ((u >= 0xF0) && (u <= 0xF7))
         byteCount = 4;
     else
-        throw JsonParseExcept(JSON_INVALID_UTF8_CHAR, pos, buf);
+        throw JsonParseExcept(JSON_INVALID_UTF8_CHAR, _pos(), m_line, _col());
 
-    dest.push_back(*pos);
-    ++pos;
-    for (auto p0 = pos; pos != buf.end() && pos < p0 + byteCount - 1; ++pos)
+    dest.push_back(*m_pos);
+    ++m_pos;
+    for (auto p0 = m_pos; m_pos != m_buffer.end() && m_pos < p0 + byteCount - 1; ++m_pos)
     {
-        u = static_cast<uint8_t>(*pos);
+        u = static_cast<uint8_t>(*m_pos);
         if ((u >= 0x80) && (u <= 0xBF))
-            dest.push_back(*pos);
+            dest.push_back(*m_pos);
         else
-            throw JsonParseExcept(JSON_INVALID_UTF8_CHAR, pos, buf);
+            throw JsonParseExcept(JSON_INVALID_UTF8_CHAR, _pos(), m_line, _col());
     }
 }
 
-inline JsonStr_t JsonParser::_parseString(std::string::const_iterator &pos,
-                                          const std::string &buf)
+inline JsonStr_t JsonParser::_parseString()
 {
-    assert((pos != buf.end()) && (*pos == '"'));
-    ++pos;
+    assert((m_pos != m_buffer.end()) && (*m_pos == '"'));
+    ++m_pos;
     JsonStr_t str;
-    while (pos != buf.end() && (*pos != '"'))
+    while (m_pos != m_buffer.end() && (*m_pos != '"'))
     {
-        switch (*pos)
+        switch (*m_pos)
         {
         case '\\':
-            _parseEscapeSequence(str, pos, buf);
+            _parseEscapeSequence(str);
             break;
         default:
-            if (static_cast<uint8_t>(*pos) < 0x20)
+            if (static_cast<uint8_t>(*m_pos) < 0x20)
             {
-                throw JsonParseExcept(JSON_INVALID_STRING_CHAR, pos, buf);
+                throw JsonParseExcept(JSON_INVALID_STRING_CHAR, _pos(), m_line, _col());
             }
-            _parseUTF8(str, pos, buf);
+            _parseUTF8(str);
         }
     }
-    ++pos;
+    ++m_pos;
     return str;
 }
 
-inline JsonNode JsonParser::_parseNumber(std::string::const_iterator &pos,
-                                         const std::string &buf)
+inline JsonNode JsonParser::_parseNumber()
 {
-    assert(pos != buf.end());
+    assert(m_pos != m_buffer.end());
 
-    auto p = pos;
+    auto p = m_pos;
     p += (*p == '-');
-    if (p == buf.end())
-        throw JsonParseExcept{JSON_INVALID_NUMBER, pos, buf};
+    if (p == m_buffer.end())
+        throw JsonParseExcept{JSON_INVALID_NUMBER, _pos(), m_line, _col()};
     if (*p == '0')
     {
         ++p;
@@ -892,34 +864,34 @@ inline JsonNode JsonParser::_parseNumber(std::string::const_iterator &pos,
     else
     {
         if (!std::isdigit(*p) || *p == '0')
-            throw JsonParseExcept{JSON_INVALID_NUMBER, pos, buf};
-        for (; p != buf.end() && std::isdigit(*p); ++p)
+            throw JsonParseExcept{JSON_INVALID_NUMBER, _pos(), m_line, _col()};
+        for (; p != m_buffer.end() && std::isdigit(*p); ++p)
             ;
     }
-    if (p != buf.end() && *p == '.')
+    if (p != m_buffer.end() && *p == '.')
     {
         ++p;
-        if (p == buf.end() || !std::isdigit(*p))
-            throw JsonParseExcept{JSON_INVALID_NUMBER, pos, buf};
-        for (; p != buf.end() && std::isdigit(*p); ++p)
+        if (p == m_buffer.end() || !std::isdigit(*p))
+            throw JsonParseExcept{JSON_INVALID_NUMBER, _pos(), m_line, _col()};
+        for (; p != m_buffer.end() && std::isdigit(*p); ++p)
             ;
     }
-    if (p != buf.end() && (*p == 'e' || *p == 'E'))
+    if (p != m_buffer.end() && (*p == 'e' || *p == 'E'))
     {
         ++p;
-        if (p == buf.end())
-            throw JsonParseExcept{JSON_INVALID_NUMBER, pos, buf};
+        if (p == m_buffer.end())
+            throw JsonParseExcept{JSON_INVALID_NUMBER, _pos(), m_line, _col()};
         if (*p == '+' || *p == '-')
             ++p;
-        if (p == buf.end())
-            throw JsonParseExcept{JSON_INVALID_NUMBER, pos, buf};
-        for (; p != buf.end() && std::isdigit(*p); ++p)
+        if (p == m_buffer.end())
+            throw JsonParseExcept{JSON_INVALID_NUMBER, _pos(), m_line, _col()};
+        for (; p != m_buffer.end() && std::isdigit(*p); ++p)
             ;
     }
 
     JsonNum_t ret;
     size_t idx = 0;
-    const std::string &numStr = buf.substr(pos - buf.begin(), p - pos);
+    const std::string &numStr = m_buffer.substr(_pos(), p - m_pos);
     try
     {
 #ifndef JSON_PARSER_USE_FLOAT
@@ -930,54 +902,61 @@ inline JsonNode JsonParser::_parseNumber(std::string::const_iterator &pos,
     }
     catch (const std::invalid_argument &)
     {
-        throw JsonParseExcept(JSON_INVALID_NUMBER, pos, buf);
+        throw JsonParseExcept(JSON_INVALID_NUMBER, _pos(), m_line, _col());
     }
     catch (const std::out_of_range &)
     {
-        throw JsonParseExcept(JSON_NUMBER_OUT_OF_RANGE, pos, buf);
+        throw JsonParseExcept(JSON_NUMBER_OUT_OF_RANGE, _pos(), m_line, _col());
     }
-    pos += idx;
+    m_pos += idx;
     return ret;
 }
 
-inline JsonNode JsonParser::_parseLiteral(std::string::const_iterator &pos,
-                                          const std::string &buf)
+inline JsonNode JsonParser::_parseLiteral()
 {
-    assert((pos != buf.end()) && (*pos == 'n' || *pos == 't' || *pos == 'f'));
-    if (buf.end() - pos < 4)
+    assert((m_pos != m_buffer.end()) && (*m_pos == 'n' || *m_pos == 't' || *m_pos == 'f'));
+    if (m_buffer.end() - m_pos < 4)
     {
-        throw JsonParseExcept(JSON_INVALID_LITERAL, pos, buf);
+        throw JsonParseExcept(JSON_INVALID_LITERAL, _pos(), m_line, _col());
     }
-    if (*pos == 'n' && *(pos + 1) == 'u' && *(pos + 2) == 'l' && *(pos + 3) == 'l')
+    if (*m_pos == 'n' && *(m_pos + 1) == 'u' && *(m_pos + 2) == 'l' && *(m_pos + 3) == 'l')
     {
-        pos += 4;
+        m_pos += 4;
         return JsonNull;
     }
-    if (*pos == 't' && *(pos + 1) == 'r' && *(pos + 2) == 'u' && *(pos + 3) == 'e')
+    if (*m_pos == 't' && *(m_pos + 1) == 'r' && *(m_pos + 2) == 'u' && *(m_pos + 3) == 'e')
     {
-        pos += 4;
+        m_pos += 4;
         return JsonBool_t(true);
     }
-    if (buf.end() - pos < 5)
+    if (m_buffer.end() - m_pos < 5)
     {
-        throw JsonParseExcept(JSON_INVALID_LITERAL, pos, buf);
+        throw JsonParseExcept(JSON_INVALID_LITERAL, _pos(), m_line, _col());
     }
-    if (*pos == 'f' && *(pos + 1) == 'a' && *(pos + 2) == 'l' && *(pos + 3) == 's' && *(pos + 4) == 'e')
+    if (*m_pos == 'f' && *(m_pos + 1) == 'a' && *(m_pos + 2) == 'l' && *(m_pos + 3) == 's' && *(m_pos + 4) == 'e')
     {
-        pos += 5;
+        m_pos += 5;
         return JsonBool_t(false);
     }
-    throw JsonParseExcept(JSON_INVALID_LITERAL, pos, buf);
+    throw JsonParseExcept(JSON_INVALID_LITERAL, _pos(), m_line, _col());
 }
 
-inline void JsonParser::_skipSpace(std::string::const_iterator &pos,
-                                   const std::string &buf)
+inline void JsonParser::_skipSpace()
 {
-    while (pos != buf.end() && ((*pos == ' ') ||
-                                (*pos == '\t') ||
-                                (*pos == '\n') ||
-                                (*pos == '\r')))
-        ++pos;
+    while (m_pos != m_buffer.end() && ((*m_pos == ' ') ||
+                                       (*m_pos == '\t') ||
+                                       (*m_pos == '\n') ||
+                                       (*m_pos == '\r')))
+    {
+        if (*m_pos == '\r' || *m_pos == '\n')
+        {
+            ++m_line;
+            if ((*m_pos == '\r') && (m_pos + 1 != m_buffer.end()) && *(m_pos + 1) == '\n') // windows new line
+                ++m_pos;
+            m_lineLen = _pos();
+        }
+        ++m_pos;
+    }
 }
 
 #endif

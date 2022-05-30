@@ -1,15 +1,3 @@
-# Json Parser
-
-## Run test
-
-```
-g++ test.cpp -o test -std=c++17
-./test
-```
-
-## Example
-
-```c++
 #include "JsonParser.hpp"
 #include <iostream>
 int main()
@@ -63,4 +51,3 @@ int main()
     JsonNode json5 = parser.parse("[\"z\\u00df\\u6c34\\ud83c\\udf4c\"]");
     std::cout << json5.toString(false) << std::endl; // utf-8 encoded
 }
-```
