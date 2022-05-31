@@ -279,6 +279,68 @@ private:
         }
     }
 
+    std::string _toStringFormatted(uint16_t depth, uint8_t indent, bool decodeUTF8) const
+    {
+        if (depth >= JSON_MAX_DEPTH)
+        {
+            throw std::runtime_error("Json string conversion failure: json too deep");
+            return "...";
+        }
+        switch (m_value.index())
+        {
+        case JsonEmptyType:
+            return "";
+        case JsonNullType:
+            return "null";
+        case JsonBoolType:
+            return getBool() ? "true" : "false";
+        case JsonNumType:
+        {
+            std::stringstream ss;
+            ss.precision(JSON_DECIMAL_TO_STRING_PRECISION);
+            ss << getNum();
+            return ss.str();
+        }
+        case JsonStrType:
+            return '"' + _toJsonString(getStr(), decodeUTF8) + '"';
+        case JsonArrType:
+        {
+            JsonArr_t arr = getArr();
+            if (arr.size() == 0)
+                return "[]";
+            std::stringstream ss;
+            std::string spaces(depth * indent, ' '), spaces2(indent, ' ');
+            ss << "[\n";
+            for (size_t i = 0; i != arr.size() - 1; ++i)
+                ss << spaces << spaces2 << arr[i]->_toStringFormatted(depth + 1, indent, decodeUTF8) << ",\n";
+            ss << spaces << spaces2 << arr.back()->_toStringFormatted(depth + 1, indent, decodeUTF8) << '\n'
+               << spaces << ']';
+            return ss.str();
+        }
+        default: // JsonObjType
+        {
+            JsonObj_t obj = getObj();
+            if (obj.size() == 0)
+                return "{}";
+            size_t i = 0;
+            std::stringstream ss;
+            std::string spaces(depth * indent, ' '), spaces2(indent, ' ');
+            ss << "{\n";
+            for (auto &each : obj)
+            {
+                ss << spaces << spaces2 << '"' << _toJsonString(each.first, decodeUTF8)
+                   << "\": " << each.second->_toStringFormatted(depth + 1, indent, decodeUTF8);
+                ++i;
+                if (i < obj.size())
+                    ss << ',';
+                ss << '\n';
+            }
+            ss << spaces << '}';
+            return ss.str();
+        }
+        }
+    }
+
 public:
     JsonNode() : m_value(JsonEmpty_t()) {}
 
@@ -440,6 +502,11 @@ public:
     std::string toString(bool decodeUTF8 = true) const
     {
         return _toString(0, decodeUTF8);
+    }
+
+    std::string toStringFormatted(uint8_t indent = 4u, bool decodeUTF8 = true) const
+    {
+        return _toStringFormatted(0, indent, decodeUTF8);
     }
 
     JsonNode copy() const

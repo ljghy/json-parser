@@ -32,7 +32,7 @@ int main()
 
     JsonNode json2 = json1; // shallow copy
     json2["tag"] = "object2";
-    std::cout << json1.toString() << std::endl;
+    std::cout << json1.toStringFormatted(2) << std::endl;
 
     // construct
     JsonNode json3 = {{"key", jsptr("value")},
@@ -41,7 +41,7 @@ int main()
                       {"arr", jsptr({jsptr(1), jsptr("2"), jsptr({jsptr(3)})})}};
     if (json3.find("arr"))
         std::cout << json3["arr"].toString() << std::endl;
-    std::cout << json3.toString() << std::endl;
+    std::cout << json3.toStringFormatted() << std::endl;
 
     // parse utf-8 encoded string
     jsonStr = reinterpret_cast<const char *>(+u8"\"z\u00df\u6c34\U0001f34c\"");
