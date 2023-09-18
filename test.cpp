@@ -25,7 +25,7 @@ int main()
         {
             json = parser.parse(loadFromFile(filename));
         }
-        catch (const JsonParseExcept &e)
+        catch (const std::exception &e)
         {
             std::cerr << "Fail: " << filename << ": " << e.what() << '\n';
             success = false;
@@ -33,7 +33,7 @@ int main()
         if (success)
         {
             std::cerr << "Success: " << filename << "\n";
-            std::cerr << json.toString(false) << '\n';
+            std::cerr << json.toString() << '\n';
         }
     }
 }

@@ -22,38 +22,38 @@ int main()
     {
         json1 = parser.parse(jsonStr);
     }
-    catch (const JsonParseExcept &e)
+    catch (const std::exception &e)
     {
         std::cerr << e.what() << std::endl;
     }
 
     // get value
-    std::cout << json1["name"].getStr() << std::endl;
-    std::cout << json1["center"][0].getNum() << ' '
-              << json1["center"][1].getNum() << ' '
-              << json1["center"][2].getNum() << std::endl;
-    std::cout << json1["radius"].getNum() << std::endl;
+    std::cout << json1["name"].get<const char*>() << std::endl;
+    std::cout << json1["center"][0].get<float>() << ' '
+              << json1["center"][1].get<int>() << ' '
+              << json1["center"][2].get<size_t>() << std::endl;
+    std::cout << json1["radius"].get<double>() << std::endl;
 
     // set value
     json1["radius"] = 5;
-    json1["center"] = {jsptr(4), jsptr(5), jsptr(6)};
+    json1["center"] = {4, 5, 6};
     json1["center"][0] = 7.5;
-    json1["center"][1] = json1.copy(); // deep copy
+    json1["center"][1] = json1;
     json1["tag"] = "object1";          // new key
     std::cout << json1.toString() << std::endl;
 
-    JsonNode json2 = json1; // shallow copy
+    JsonNode json2 = json1; 
     json2["tag"] = "object2";
-    std::cout << json1.toStringFormatted(2) << std::endl;
+    std::cout << json1.toString(2) << std::endl;
 
     // construct
-    JsonNode json3 = {{"key", jsptr("value")},
-                      {"false", jsptr(false)},
-                      {"null", jsptr(JsonNull)},
-                      {"arr", jsptr({jsptr(1), jsptr("2"), jsptr({jsptr(3)})})}};
-    if (json3.find("arr"))
+    JsonNode json3 = {{"key"_key, "value"},
+                      {"false"_key, false},
+                      {"null"_key, JsonNull},
+                      {"arr"_key, {1, "2", {3}}}};
+    if (json3.hasKey("arr"))
         std::cout << json3["arr"].toString() << std::endl;
-    std::cout << json3.toStringFormatted() << std::endl;
+    std::cout << json3.toString() << std::endl;
 
     // parse utf-8 encoded string
     jsonStr = reinterpret_cast<const char *>(+u8"\"z\u00df\u6c34\U0001f34c\"");
@@ -61,6 +61,6 @@ int main()
     std::cout << json4.toString() << std::endl; // decode utf-8
 
     JsonNode json5 = parser.parse("[\"z\\u00df\\u6c34\\ud83c\\udf4c\"]");
-    std::cout << json5.toString(false) << std::endl; // utf-8 encoded
+    std::cout << json5.toString(4, false) << std::endl; // utf-8 encoded
 }
 ```
