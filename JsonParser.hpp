@@ -570,6 +570,11 @@ public:
         break;
       case JsonType::Arr: {
         const auto &arr = std::get<JsonArr_t>(node->m_value);
+        if (arr.empty()) {
+          ss << "[]";
+          stateStack.pop();
+          break;
+        }
         auto &it = stateStack.top().arrIt;
         if (it == arr.cbegin()) {
           if (formatted)
@@ -597,6 +602,11 @@ public:
       } break;
       case JsonType::Obj: {
         const auto &obj = std::get<JsonObj_t>(node->m_value);
+        if (obj.empty()) {
+          ss << "{}";
+          stateStack.pop();
+          break;
+        }
         auto &it = stateStack.top().objIt;
         if (it == obj.cbegin()) {
           if (formatted)
