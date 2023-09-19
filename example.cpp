@@ -37,7 +37,7 @@ int main()
     // construct
     JsonNode json3 = {{"key"_key, "value"},
                       {"false"_key, false},
-                      {"null"_key, JsonNull},
+                      {"null"_key, JsonNull()},
                       {"arr"_key, {1, "2", {3}}}};
     if (json3.hasKey("arr"))
         std::cout << json3["arr"].toString() << std::endl;
@@ -50,4 +50,9 @@ int main()
 
     JsonNode json5 = parser.parse("[\"z\\u00df\\u6c34\\ud83c\\udf4c\"]");
     std::cout << json5.toString(4, false) << std::endl; // utf-8 encoded
+
+    std::cout << "Empty: " << JsonNode{}.toString() << std::endl;
+    std::cout << "Null: " << JsonNode(JsonNull()).toString() << std::endl;
+    std::cout << "Empty array: " << JsonNode(JsonArr_t{}).toString() << std::endl;
+    std::cout << "Empty object: " << JsonNode(JsonObj_t{}).toString() << std::endl;
 }

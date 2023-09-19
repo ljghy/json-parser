@@ -1,6 +1,7 @@
 #ifndef JSON_PARSER_HPP_
 #define JSON_PARSER_HPP_
 
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
@@ -13,8 +14,14 @@
 #include <variant>
 #include <vector>
 
-inline constexpr struct JsonNull_t {
-} JsonNull;
+struct JsonNull_t {
+  friend constexpr JsonNull_t JsonNull();
+
+private:
+  JsonNull_t() = default;
+};
+
+inline constexpr JsonNull_t JsonNull() { return JsonNull_t{}; }
 
 class JsonNode;
 
@@ -32,7 +39,8 @@ inline JsonKeyLiteral_t operator""_key(const char *key, size_t len) {
 }
 
 enum class JsonType : uint8_t {
-  Null = 0,
+  Empty = 0,
+  Null,
   Bool,
   Num,
   Str,
@@ -198,7 +206,7 @@ public:
         }
       } break;
       case JsonType::Null:
-        nodeStack.top()->m_value.emplace<JsonNull_t>();
+        nodeStack.top()->m_value.emplace<JsonNull_t>(JsonNull());
         stateStack.pop();
         nodeStack.pop();
         break;
@@ -219,6 +227,9 @@ public:
         stateStack.pop();
         nodeStack.pop();
         break;
+      default:
+        stateStack.pop();
+        nodeStack.pop();
       }
     }
   }
@@ -357,9 +368,11 @@ public:
 
   JsonType type() const { return static_cast<JsonType>(m_value.index()); }
   std::string typeStr() const {
-    const char *types[]{"null", "bool", "num", "str", "arr", "obj"};
+    const char *types[]{"empty", "null", "bool", "num", "str", "arr", "obj"};
     return types[m_value.index()];
   }
+
+  bool isEmpty() const { return type() == JsonType::Empty; }
   bool isNull() const { return type() == JsonType::Null; }
   bool isBool() const { return type() == JsonType::Bool; }
   bool isNum() const { return type() == JsonType::Num; }
@@ -583,6 +596,9 @@ public:
           stateStack.pop();
         }
       } break;
+      default:
+        stateStack.pop();
+        break;
       }
     }
     return ss.str();
@@ -661,7 +677,8 @@ private:
   }
 
 private:
-  std::variant<JsonNull_t, bool, JsonNum_t, JsonStr_t, JsonArr_t, JsonObj_t>
+  std::variant<std::monostate, JsonNull_t, bool, JsonNum_t, JsonStr_t,
+               JsonArr_t, JsonObj_t>
       m_value;
 };
 
@@ -789,7 +806,7 @@ inline void JsonParser::parseLiteral(JsonNode *node) {
   if (rem >= 4 && ch() == 'n' && m_input[m_pos + 1] == 'u' &&
       m_input[m_pos + 2] == 'l' && m_input[m_pos + 3] == 'l') {
     m_pos += 4;
-    node->m_value.emplace<JsonNull_t>();
+    node->m_value.emplace<JsonNull_t>(JsonNull());
   } else if (rem >= 4 && ch() == 't' && m_input[m_pos + 1] == 'r' &&
              m_input[m_pos + 2] == 'u' && m_input[m_pos + 3] == 'e') {
     m_pos += 4;
