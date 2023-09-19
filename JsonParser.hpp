@@ -422,7 +422,32 @@ private:
     }
 
     bool operator==(const Iterator &rhs) const { return m_iter == rhs.m_iter; }
+    bool operator==(const ArrIter &rhs) const {
+      return m_iter.index() == 0 && std::get<0>(m_iter) == rhs;
+    }
+    bool operator==(const ObjIter &rhs) const {
+      return m_iter.index() == 1 && std::get<1>(m_iter) == rhs;
+    }
+    friend bool operator==(const ArrIter &lhs, const Iterator &rhs) {
+      return rhs == lhs;
+    }
+    friend bool operator==(const ObjIter &lhs, const Iterator &rhs) {
+      return rhs == lhs;
+    }
+
     bool operator!=(const Iterator &rhs) const { return m_iter != rhs.m_iter; }
+    bool operator!=(const ArrIter &rhs) const {
+      return m_iter.index() != 0 || std::get<0>(m_iter) != rhs;
+    }
+    bool operator!=(const ObjIter &rhs) const {
+      return m_iter.index() != 1 || std::get<1>(m_iter) != rhs;
+    }
+    friend bool operator!=(const ArrIter &lhs, const Iterator &rhs) {
+      return rhs != lhs;
+    }
+    friend bool operator!=(const ObjIter &lhs, const Iterator &rhs) {
+      return rhs != lhs;
+    }
 
     auto &operator*() const {
       if (m_iter.index() == 0)
