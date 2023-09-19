@@ -4,12 +4,6 @@
 #include <sstream>
 #include "JsonParser.hpp"
 
-std::string loadFromFile(const std::string &filename)
-{
-    std::ifstream ifs(filename, std::ios::binary);
-    return std::string(std::istreambuf_iterator<char>{ifs}, {});
-}
-
 int main()
 {
     JsonParser parser;
@@ -23,7 +17,8 @@ int main()
         std::string filename = dir + ss.str().substr(dir.size() + 1, ss.str().size() - dir.size() - 2);
         try
         {
-            json = parser.parse(loadFromFile(filename));
+            std::ifstream fin(filename, std::ios::binary);
+            json = parser.parse(fin);
         }
         catch (const std::exception &e)
         {

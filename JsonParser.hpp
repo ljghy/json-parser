@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
+#include <istream>
 #include <map>
 #include <sstream>
 #include <stack>
@@ -689,6 +690,7 @@ public:
   JsonParser &operator=(const JsonParser &) = delete;
 
   JsonNode parse(const std::string &buffer);
+  JsonNode parse(std::istream &is);
 
 private:
   void skipSpace();
@@ -793,6 +795,10 @@ inline JsonNode JsonParser::parse(const std::string &input) {
   }
 
   return ret;
+}
+
+inline JsonNode JsonParser::parse(std::istream &is) {
+  return parse(std::string(std::istreambuf_iterator<char>{is}, {}));
 }
 
 inline void JsonParser::skipSpace() {
