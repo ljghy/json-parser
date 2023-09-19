@@ -353,7 +353,7 @@ public:
     return std::get<JsonObj_t>(m_value).find(key);
   }
 
-  const size_t size() const {
+  size_t size() const {
     if (isStr()) {
       return std::get<JsonStr_t>(m_value).size();
     } else if (isArr()) {
@@ -514,7 +514,7 @@ public:
 public:
   std::string toString(size_t indent = -1, bool ascii = true) const {
 
-    bool formatted = (indent != -1);
+    bool formatted = (indent != static_cast<size_t>(-1));
 
     std::stack<ConstTraverseState> stateStack;
     stateStack.emplace(this);
@@ -632,7 +632,7 @@ private:
         break;
       default: {
         if (ascii && *ite & 0x80)
-          ss << decodeUtf8(ite, src);
+          ss << decodeUtf8(ite);
         else
           ss << *ite;
       } break;
@@ -641,8 +641,7 @@ private:
     return ss.str();
   }
 
-  static std::string decodeUtf8(std::string::const_iterator &ite,
-                                const JsonStr_t &src) {
+  static std::string decodeUtf8(std::string::const_iterator &ite) {
     uint32_t u = 0;
     if (!(*ite & 0x20)) {
       u = ((*ite & 0x1F) << 6) | (*(ite + 1) & 0x3F);
