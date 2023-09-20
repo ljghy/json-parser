@@ -76,13 +76,6 @@ inline const char *getJsonErrorMsg(JsonErrorCode code) {
   return JsonErrorMsg[static_cast<uint8_t>(code)];
 }
 
-template <typename T> struct isJsonType {
-  static constexpr bool value =
-      std::is_same_v<T, JsonNull_t> || std::is_same_v<T, bool> ||
-      std::is_same_v<T, JsonNum_t> || std::is_same_v<T, JsonStr_t> ||
-      std::is_same_v<T, JsonArr_t> || std::is_same_v<T, JsonObj_t>;
-};
-
 template <typename T>
 inline T strToJsonNum_t(const std::string &, size_t *idx) {
   return T{};
@@ -113,9 +106,9 @@ private:
 
     TraverseState(JsonNode *node) : node(node) {
       if (node->isArr())
-        arrIt = std::get<JsonArr_t>(node->m_value).begin();
+        arrIt = std::get<JsonArr_t *>(node->m_value)->begin();
       else if (node->isObj())
-        objIt = std::get<JsonObj_t>(node->m_value).begin();
+        objIt = std::get<JsonObj_t *>(node->m_value)->begin();
     }
   };
 
@@ -128,10 +121,30 @@ private:
 
     ConstTraverseState(const JsonNode *node) : node(node) {
       if (node->isArr())
-        arrIt = std::get<JsonArr_t>(node->m_value).cbegin();
+        arrIt = std::get<JsonArr_t *>(node->m_value)->cbegin();
       else if (node->isObj())
-        objIt = std::get<JsonObj_t>(node->m_value).cbegin();
+        objIt = std::get<JsonObj_t *>(node->m_value)->cbegin();
     }
+  };
+
+private:
+  template <typename T> struct isJsonType {
+    static constexpr bool value =
+        std::is_same_v<T, JsonNull_t> || std::is_same_v<T, bool> ||
+        std::is_same_v<T, JsonNum_t> || std::is_same_v<T, JsonStr_t> ||
+        std::is_same_v<T, JsonArr_t> || std::is_same_v<T, JsonObj_t>;
+  };
+
+  template <typename T> struct isJsonValType {
+    static constexpr bool value = std::is_same_v<T, JsonNull_t> ||
+                                  std::is_same_v<T, bool> ||
+                                  std::is_same_v<T, JsonNum_t>;
+  };
+
+  template <typename T> struct isJsonPtrType {
+    static constexpr bool value = std::is_same_v<T, JsonStr_t> ||
+                                  std::is_same_v<T, JsonArr_t> ||
+                                  std::is_same_v<T, JsonObj_t>;
   };
 
 public:
@@ -139,28 +152,32 @@ public:
 
   JsonNode() = default;
 
-  template <typename T,
-            typename = std::enable_if_t<isJsonType<T>::value, JsonNode &>>
+  template <typename T, typename = std::enable_if_t<isJsonValType<T>::value>>
   JsonNode(const T &value) : m_value(value) {}
 
-  template <typename T,
-            typename = std::enable_if_t<isJsonType<T>::value, JsonNode &>>
+  template <typename T, typename = std::enable_if_t<isJsonValType<T>::value>>
   JsonNode(T &&value) : m_value(value) {}
+
+  JsonNode(const JsonArr_t &arr) : m_value(new JsonArr_t(arr)) {}
+  JsonNode(JsonArr_t &&arr) : m_value(new JsonArr_t(std::move(arr))) {}
+
+  JsonNode(const JsonObj_t &obj) : m_value(new JsonObj_t(obj)) {}
+  JsonNode(JsonObj_t &&obj) : m_value(new JsonObj_t(std::move(obj))) {}
 
   template <typename T, typename = std::enable_if_t<!isJsonType<T>::value &&
                                                     std::is_arithmetic_v<T>>>
   JsonNode(T num) : m_value(static_cast<JsonNum_t>(num)) {}
 
-  JsonNode(const char *str) : m_value(JsonStr_t(str)) {}
+  JsonNode(const char *str) : m_value(new JsonStr_t(str)) {}
 
   JsonNode(const std::initializer_list<JsonNode> &arr)
-      : m_value(JsonArr_t(arr)) {}
+      : m_value(new JsonArr_t(arr)) {}
   JsonNode(
       const std::initializer_list<std::pair<const JsonKeyLiteral_t, JsonNode>>
           &obj) {
-    m_value = JsonObj_t{};
+    auto o = m_value.emplace<JsonObj_t *>(new JsonObj_t{});
     for (const auto &p : obj) {
-      std::get<JsonObj_t>(m_value).emplace(p.first.key, p.second);
+      o->emplace(p.first.key, p.second);
     }
   }
 
@@ -174,33 +191,34 @@ public:
       auto node = nodeStack.top();
       switch (otherNode->type()) {
       case JsonType::Arr: {
-        auto &otherArr = std::get<JsonArr_t>(otherNode->m_value);
+        auto &otherArr = *std::get<JsonArr_t *>(otherNode->m_value);
         auto &it = stateStack.top().arrIt;
         if (it == otherArr.cbegin()) {
-          node->m_value.emplace<JsonArr_t>().reserve(otherArr.size());
+          node->m_value.emplace<JsonArr_t *>(new JsonArr_t{})
+              ->reserve(otherArr.size());
         }
         if (it != otherArr.cend()) {
           const auto otherChild = &(*it);
           ++it;
           stateStack.emplace(otherChild);
           nodeStack.emplace(
-              &(std::get<JsonArr_t>(node->m_value).emplace_back()));
+              &(std::get<JsonArr_t *>(node->m_value)->emplace_back()));
         } else {
           stateStack.pop();
           nodeStack.pop();
         }
       } break;
       case JsonType::Obj: {
-        auto &otherObj = std::get<JsonObj_t>(otherNode->m_value);
+        auto &otherObj = *std::get<JsonObj_t *>(otherNode->m_value);
         auto &it = stateStack.top().objIt;
         if (it == otherObj.cbegin()) {
-          node->m_value.emplace<JsonObj_t>();
+          node->m_value.emplace<JsonObj_t *>(new JsonObj_t{});
         }
         if (it != otherObj.cend()) {
           const auto otherChild = &(it->second);
           stateStack.emplace(otherChild);
-          nodeStack.emplace(&(std::get<JsonObj_t>(node->m_value)
-                                  .emplace(it->first, JsonNode{})
+          nodeStack.emplace(&(std::get<JsonObj_t *>(node->m_value)
+                                  ->emplace(it->first, JsonNode{})
                                   .first->second));
           ++it;
         } else {
@@ -225,8 +243,8 @@ public:
         nodeStack.pop();
         break;
       case JsonType::Str:
-        nodeStack.top()->m_value.emplace<JsonStr_t>(
-            otherNode->get<JsonStr_t>());
+        nodeStack.top()->m_value.emplace<JsonStr_t *>(
+            new JsonStr_t(*std::get<JsonStr_t *>(otherNode->m_value)));
         stateStack.pop();
         nodeStack.pop();
         break;
@@ -237,67 +255,159 @@ public:
     }
   }
 
-  JsonNode(JsonNode &&other) : m_value(std::move(other.m_value)) {}
+  JsonNode(JsonNode &&other) noexcept {
+    switch (other.type()) {
+    case JsonType::Arr:
+      m_value = std::get<JsonArr_t *>(other.m_value);
+      break;
+    case JsonType::Obj:
+      m_value = std::get<JsonObj_t *>(other.m_value);
+      break;
+    case JsonType::Str:
+      m_value = std::get<JsonStr_t *>(other.m_value);
+      break;
+    default:
+      m_value = other.m_value;
+    }
+    other.m_value = std::monostate{};
+  }
 
   // Destructor
 
   ~JsonNode() {
+    if (isEmpty())
+      return;
+
     std::stack<TraverseState> stateStack;
     stateStack.emplace(this);
     while (!stateStack.empty()) {
       auto node = stateStack.top().node;
       switch (node->type()) {
       case JsonType::Arr: {
-        auto &arr = std::get<JsonArr_t>(node->m_value);
+        auto &arr = std::get<JsonArr_t *>(node->m_value);
         auto &it = stateStack.top().arrIt;
-        if (it != arr.cend()) {
+        if (it != arr->cend()) {
           const auto child = &(*it);
           ++it;
           stateStack.emplace(child);
         } else {
-          arr.clear();
+          delete arr;
+          node->m_value = std::monostate{};
           stateStack.pop();
         }
       } break;
       case JsonType::Obj: {
-        auto &obj = std::get<JsonObj_t>(node->m_value);
+        auto &obj = std::get<JsonObj_t *>(node->m_value);
         auto &it = stateStack.top().objIt;
-        if (it != obj.cend()) {
+        if (it != obj->cend()) {
           const auto child = &(it->second);
           ++it;
           stateStack.emplace(child);
         } else {
-          obj.clear();
+          delete obj;
+          node->m_value = std::monostate{};
           stateStack.pop();
         }
       } break;
+      case JsonType::Str:
+        delete std::get<JsonStr_t *>(node->m_value);
+        node->m_value = std::monostate{};
+        stateStack.pop();
+        break;
       default:
+        node->m_value = std::monostate{};
         stateStack.pop();
       }
     }
   }
 
-  // Assignment operators
+  void clear() {
+    switch (type()) {
+    case JsonType::Arr:
+      delete std::get<JsonArr_t *>(m_value);
+      break;
+    case JsonType::Obj:
+      delete std::get<JsonObj_t *>(m_value);
+      break;
+    case JsonType::Str:
+      delete std::get<JsonStr_t *>(m_value);
+      break;
+    default:
+      break;
+    }
+    m_value = std::monostate{};
+  }
 
+  // Assignment operators
   JsonNode &operator=(const JsonNode &other) {
-    m_value = other.m_value;
+    if (this == &other)
+      return *this;
+
+    switch (other.type()) {
+    case JsonType::Arr: {
+      const auto &otherArr = *std::get<JsonArr_t *>(other.m_value);
+      if (isArr())
+        *std::get<JsonArr_t *>(m_value) = otherArr;
+      else {
+        clear();
+        m_value = new JsonArr_t(otherArr);
+      }
+    } break;
+    case JsonType::Obj: {
+      const auto &otherObj = *std::get<JsonObj_t *>(other.m_value);
+      if (isObj())
+        *std::get<JsonObj_t *>(m_value) = otherObj;
+      else {
+        clear();
+        m_value = new JsonObj_t(otherObj);
+      }
+    } break;
+    case JsonType::Str: {
+      const auto &otherStr = *std::get<JsonStr_t *>(other.m_value);
+      if (isStr())
+        *std::get<JsonStr_t *>(m_value) = otherStr;
+      else {
+        clear();
+        m_value = new JsonStr_t(otherStr);
+      }
+    } break;
+    default:
+      clear();
+      m_value = other.m_value;
+    }
     return *this;
   }
 
-  JsonNode &operator=(JsonNode &&other) {
-    m_value = std::move(other.m_value);
+  JsonNode &operator=(JsonNode &&other) noexcept {
+    if (this == &other)
+      return *this;
+
+    switch (other.type()) {
+    case JsonType::Arr:
+      m_value = std::get<JsonArr_t *>(other.m_value);
+      break;
+    case JsonType::Obj:
+      m_value = std::get<JsonObj_t *>(other.m_value);
+      break;
+    case JsonType::Str:
+      m_value = std::get<JsonStr_t *>(other.m_value);
+      break;
+    default:
+      m_value = other.m_value;
+    }
+    other.m_value = std::monostate{};
     return *this;
   }
 
   template <typename T>
-  typename std::enable_if_t<isJsonType<T>::value, JsonNode &>
+  typename std::enable_if_t<isJsonValType<T>::value, JsonNode &>
   operator=(const T &value) {
     m_value = value;
     return *this;
   }
 
   template <typename T>
-  typename std::enable_if_t<isJsonType<T>::value, JsonNode &>
+  typename std::enable_if_t<isJsonValType<T>::value, JsonNode &>
   operator=(T &&value) {
     m_value = std::move(value);
     return *this;
@@ -307,61 +417,69 @@ public:
   typename std::enable_if_t<!(isJsonType<T>::value) && std::is_arithmetic_v<T>,
                             JsonNode &>
   operator=(T value) {
+    clear();
     m_value = static_cast<JsonNum_t>(value);
     return *this;
   }
 
   JsonNode &operator=(const char *str) {
-    m_value = JsonStr_t(str);
+    if (isStr())
+      *std::get<JsonStr_t *>(m_value) = str;
+    else {
+      clear();
+      m_value = new JsonStr_t(str);
+    }
     return *this;
   }
 
   // Index and key
 
-  JsonNode &operator[](size_t idx) { return std::get<JsonArr_t>(m_value)[idx]; }
-  JsonNode &at(size_t idx) { return std::get<JsonArr_t>(m_value).at(idx); }
+  JsonNode &operator[](size_t idx) {
+    return (*std::get<JsonArr_t *>(m_value))[idx];
+  }
+  JsonNode &at(size_t idx) { return std::get<JsonArr_t *>(m_value)->at(idx); }
   const JsonNode &operator[](size_t idx) const {
-    return std::get<JsonArr_t>(m_value)[idx];
+    return (*std::get<JsonArr_t *>(m_value))[idx];
   }
   const JsonNode &at(size_t idx) const {
-    return std::get<JsonArr_t>(m_value).at(idx);
+    return std::get<JsonArr_t *>(m_value)->at(idx);
   }
 
   JsonNode &operator[](const std::string &key) {
-    return std::get<JsonObj_t>(m_value)[key];
+    return (*std::get<JsonObj_t *>(m_value))[key];
   }
   JsonNode &at(const std::string &key) {
-    return std::get<JsonObj_t>(m_value).at(key);
+    return std::get<JsonObj_t *>(m_value)->at(key);
   }
   const JsonNode &operator[](const std::string &key) const {
-    return std::get<JsonObj_t>(m_value).at(key);
+    return std::get<JsonObj_t *>(m_value)->at(key);
   }
   const JsonNode &at(const std::string &key) const {
-    return std::get<JsonObj_t>(m_value).at(key);
+    return std::get<JsonObj_t *>(m_value)->at(key);
   }
 
   bool hasKey(const JsonStr_t &key) const {
     if (!isObj())
       return false;
-    const auto &obj = std::get<JsonObj_t>(m_value);
+    const auto &obj = *std::get<JsonObj_t *>(m_value);
     return obj.find(key) != obj.end();
   }
 
   JsonObj_t::iterator find(const JsonStr_t &key) {
-    return std::get<JsonObj_t>(m_value).find(key);
+    return std::get<JsonObj_t *>(m_value)->find(key);
   }
 
   JsonObj_t::const_iterator find(const JsonStr_t &key) const {
-    return std::get<JsonObj_t>(m_value).find(key);
+    return std::get<JsonObj_t *>(m_value)->find(key);
   }
 
   size_t size() const {
     if (isStr()) {
-      return std::get<JsonStr_t>(m_value).size();
+      return std::get<JsonStr_t *>(m_value)->size();
     } else if (isArr()) {
-      return std::get<JsonArr_t>(m_value).size();
+      return std::get<JsonArr_t *>(m_value)->size();
     } else if (isObj()) {
-      return std::get<JsonObj_t>(m_value).size();
+      return std::get<JsonObj_t *>(m_value)->size();
     } else {
       return 0;
     }
@@ -404,18 +522,18 @@ public:
   typename std::enable_if_t<std::is_same_v<T, const char *>, const char *>
   get() const {
     if (isStr())
-      return std::get<JsonStr_t>(m_value).c_str();
+      return std::get<JsonStr_t *>(m_value)->c_str();
     else
       return nullptr;
   }
 
 private:
-  template <typename ArrIter, typename ObjIter> class Iterator {
+  template <typename ArrIter, typename ObjIter> class IteratorGen {
   public:
-    Iterator(ArrIter iter) { m_iter.template emplace<0>(iter); }
-    Iterator(ObjIter iter) { m_iter.template emplace<1>(iter); }
+    IteratorGen(ArrIter iter) { m_iter.template emplace<0>(iter); }
+    IteratorGen(ObjIter iter) { m_iter.template emplace<1>(iter); }
 
-    Iterator &operator++() {
+    IteratorGen &operator++() {
       if (m_iter.index() == 0)
         ++std::get<0>(m_iter);
       else
@@ -423,31 +541,35 @@ private:
       return *this;
     }
 
-    bool operator==(const Iterator &rhs) const { return m_iter == rhs.m_iter; }
+    bool operator==(const IteratorGen &rhs) const {
+      return m_iter == rhs.m_iter;
+    }
     bool operator==(const ArrIter &rhs) const {
       return m_iter.index() == 0 && std::get<0>(m_iter) == rhs;
     }
     bool operator==(const ObjIter &rhs) const {
       return m_iter.index() == 1 && std::get<1>(m_iter) == rhs;
     }
-    friend bool operator==(const ArrIter &lhs, const Iterator &rhs) {
+    friend bool operator==(const ArrIter &lhs, const IteratorGen &rhs) {
       return rhs == lhs;
     }
-    friend bool operator==(const ObjIter &lhs, const Iterator &rhs) {
+    friend bool operator==(const ObjIter &lhs, const IteratorGen &rhs) {
       return rhs == lhs;
     }
 
-    bool operator!=(const Iterator &rhs) const { return m_iter != rhs.m_iter; }
+    bool operator!=(const IteratorGen &rhs) const {
+      return m_iter != rhs.m_iter;
+    }
     bool operator!=(const ArrIter &rhs) const {
       return m_iter.index() != 0 || std::get<0>(m_iter) != rhs;
     }
     bool operator!=(const ObjIter &rhs) const {
       return m_iter.index() != 1 || std::get<1>(m_iter) != rhs;
     }
-    friend bool operator!=(const ArrIter &lhs, const Iterator &rhs) {
+    friend bool operator!=(const ArrIter &lhs, const IteratorGen &rhs) {
       return rhs != lhs;
     }
-    friend bool operator!=(const ObjIter &lhs, const Iterator &rhs) {
+    friend bool operator!=(const ObjIter &lhs, const IteratorGen &rhs) {
       return rhs != lhs;
     }
 
@@ -469,73 +591,73 @@ private:
   };
 
 public:
-  using iterator = Iterator<JsonArr_t::iterator, JsonObj_t::iterator>;
-  using const_iterator =
-      Iterator<JsonArr_t::const_iterator, JsonObj_t::const_iterator>;
-  using reverse_iterator =
-      Iterator<JsonArr_t::reverse_iterator, JsonObj_t::reverse_iterator>;
-  using const_reverse_iterator = Iterator<JsonArr_t::const_reverse_iterator,
-                                          JsonObj_t::const_reverse_iterator>;
+  using Iterator = IteratorGen<JsonArr_t::iterator, JsonObj_t::iterator>;
+  using ConstIterator =
+      IteratorGen<JsonArr_t::const_iterator, JsonObj_t::const_iterator>;
+  using ReverseIterator =
+      IteratorGen<JsonArr_t::reverse_iterator, JsonObj_t::reverse_iterator>;
+  using ConstReverseIterator = IteratorGen<JsonArr_t::const_reverse_iterator,
+                                           JsonObj_t::const_reverse_iterator>;
 
-  iterator begin() {
+  Iterator begin() {
     if (isArr()) {
-      return iterator(std::get<JsonArr_t>(m_value).begin());
+      return Iterator(std::get<JsonArr_t *>(m_value)->begin());
     } else
-      return iterator(std::get<JsonObj_t>(m_value).begin());
+      return Iterator(std::get<JsonObj_t *>(m_value)->begin());
   }
-  iterator end() {
+  Iterator end() {
     if (isArr()) {
-      return iterator(std::get<JsonArr_t>(m_value).end());
+      return Iterator(std::get<JsonArr_t *>(m_value)->end());
     } else
-      return iterator(std::get<JsonObj_t>(m_value).end());
+      return Iterator(std::get<JsonObj_t *>(m_value)->end());
   }
-  const_iterator begin() const {
+  ConstIterator begin() const {
     if (isArr()) {
-      return const_iterator(std::get<JsonArr_t>(m_value).begin());
+      return ConstIterator(std::get<JsonArr_t *>(m_value)->begin());
     } else
-      return const_iterator(std::get<JsonObj_t>(m_value).begin());
+      return ConstIterator(std::get<JsonObj_t *>(m_value)->begin());
   }
-  const_iterator end() const {
+  ConstIterator end() const {
     if (isArr()) {
-      return const_iterator(std::get<JsonArr_t>(m_value).end());
+      return ConstIterator(std::get<JsonArr_t *>(m_value)->end());
     } else
-      return const_iterator(std::get<JsonObj_t>(m_value).end());
+      return ConstIterator(std::get<JsonObj_t *>(m_value)->end());
   }
-  const_iterator cbegin() const {
+  ConstIterator cbegin() const {
     if (isArr()) {
-      return const_iterator(std::get<JsonArr_t>(m_value).cbegin());
+      return ConstIterator(std::get<JsonArr_t *>(m_value)->cbegin());
     } else
-      return const_iterator(std::get<JsonObj_t>(m_value).cbegin());
+      return ConstIterator(std::get<JsonObj_t *>(m_value)->cbegin());
   }
-  const_iterator cend() const {
+  ConstIterator cend() const {
     if (isArr()) {
-      return const_iterator(std::get<JsonArr_t>(m_value).cend());
+      return ConstIterator(std::get<JsonArr_t *>(m_value)->cend());
     } else
-      return const_iterator(std::get<JsonObj_t>(m_value).cend());
+      return ConstIterator(std::get<JsonObj_t *>(m_value)->cend());
   }
-  reverse_iterator rbegin() {
+  ReverseIterator rbegin() {
     if (isArr()) {
-      return reverse_iterator(std::get<JsonArr_t>(m_value).rbegin());
+      return ReverseIterator(std::get<JsonArr_t *>(m_value)->rbegin());
     } else
-      return reverse_iterator(std::get<JsonObj_t>(m_value).rbegin());
+      return ReverseIterator(std::get<JsonObj_t *>(m_value)->rbegin());
   }
-  reverse_iterator rend() {
+  ReverseIterator rend() {
     if (isArr()) {
-      return reverse_iterator(std::get<JsonArr_t>(m_value).rend());
+      return ReverseIterator(std::get<JsonArr_t *>(m_value)->rend());
     } else
-      return reverse_iterator(std::get<JsonObj_t>(m_value).rend());
+      return ReverseIterator(std::get<JsonObj_t *>(m_value)->rend());
   }
-  const_reverse_iterator rbegin() const {
+  ConstReverseIterator rbegin() const {
     if (isArr()) {
-      return const_reverse_iterator(std::get<JsonArr_t>(m_value).rbegin());
+      return ConstReverseIterator(std::get<JsonArr_t *>(m_value)->crbegin());
     } else
-      return const_reverse_iterator(std::get<JsonObj_t>(m_value).rbegin());
+      return ConstReverseIterator(std::get<JsonObj_t *>(m_value)->crbegin());
   }
-  const_reverse_iterator rend() const {
+  ConstReverseIterator rend() const {
     if (isArr()) {
-      return const_reverse_iterator(std::get<JsonArr_t>(m_value).rend());
+      return ConstReverseIterator(std::get<JsonArr_t *>(m_value)->crend());
     } else
-      return const_reverse_iterator(std::get<JsonObj_t>(m_value).rend());
+      return ConstReverseIterator(std::get<JsonObj_t *>(m_value)->crend());
   }
 
 public:
@@ -564,12 +686,12 @@ public:
         stateStack.pop();
         break;
       case JsonType::Str:
-        ss << "\"" << toJsonString(std::get<JsonStr_t>(node->m_value), ascii)
+        ss << "\"" << toJsonString(*std::get<JsonStr_t *>(node->m_value), ascii)
            << "\"";
         stateStack.pop();
         break;
       case JsonType::Arr: {
-        const auto &arr = std::get<JsonArr_t>(node->m_value);
+        const auto &arr = *std::get<JsonArr_t *>(node->m_value);
         if (arr.empty()) {
           ss << "[]";
           stateStack.pop();
@@ -601,7 +723,7 @@ public:
         }
       } break;
       case JsonType::Obj: {
-        const auto &obj = std::get<JsonObj_t>(node->m_value);
+        const auto &obj = *std::get<JsonObj_t *>(node->m_value);
         if (obj.empty()) {
           ss << "{}";
           stateStack.pop();
@@ -714,8 +836,8 @@ private:
   }
 
 private:
-  std::variant<std::monostate, JsonNull_t, bool, JsonNum_t, JsonStr_t,
-               JsonArr_t, JsonObj_t>
+  std::variant<std::monostate, JsonNull_t, bool, JsonNum_t, JsonStr_t *,
+               JsonArr_t *, JsonObj_t *>
       m_value;
 };
 
@@ -824,7 +946,7 @@ inline JsonNode JsonParser::parse() {
       break;
     case '"':
       next();
-      node->m_value.emplace<JsonStr_t>(parseString());
+      node->m_value.emplace<JsonStr_t *>(new JsonStr_t(parseString()));
       popStack();
       break;
     case '[':
@@ -1075,12 +1197,12 @@ inline void JsonParser::beginArray() {
         getJsonErrorMsg(JsonErrorCode::UnexpectedEndOfInput));
 
   auto *node = m_nodeStack.top();
-  node->m_value.emplace<JsonArr_t>();
+  node->m_value.emplace<JsonArr_t *>(new JsonArr_t{});
   if (ch() == ']') {
     next();
     popStack();
   } else {
-    m_nodeStack.push(&(std::get<JsonArr_t>(node->m_value).emplace_back()));
+    m_nodeStack.push(&(std::get<JsonArr_t *>(node->m_value)->emplace_back()));
   }
 }
 
@@ -1091,7 +1213,7 @@ inline void JsonParser::beginObject() {
         getJsonErrorMsg(JsonErrorCode::UnexpectedEndOfInput));
 
   auto *node = m_nodeStack.top();
-  node->m_value.emplace<JsonObj_t>();
+  node->m_value.emplace<JsonObj_t *>(new JsonObj_t{});
   if (ch() == '}') {
     next();
     popStack();
@@ -1101,8 +1223,8 @@ inline void JsonParser::beginObject() {
           getJsonErrorMsg(JsonErrorCode::InvalidKeyValuePair));
 
     auto key = parseKeyWithColon();
-    m_nodeStack.push(&(std::get<JsonObj_t>(node->m_value)
-                           .emplace(std::move(key), JsonNode{})
+    m_nodeStack.push(&(std::get<JsonObj_t *>(node->m_value)
+                           ->emplace(std::move(key), JsonNode{})
                            .first->second));
   }
 }
@@ -1110,11 +1232,11 @@ inline void JsonParser::beginObject() {
 inline void JsonParser::handleComma() {
   auto *node = m_nodeStack.top();
   if (node->isArr()) {
-    auto &arr = std::get<JsonArr_t>(node->m_value);
+    auto &arr = *std::get<JsonArr_t *>(node->m_value);
     m_nodeStack.push(&arr.emplace_back());
   } else if (node->isObj()) {
     skipSpace();
-    auto &obj = std::get<JsonObj_t>(node->m_value);
+    auto &obj = *std::get<JsonObj_t *>(node->m_value);
     if (eoi() || get() != '"')
       throw std::runtime_error(
           getJsonErrorMsg(JsonErrorCode::UnexpectedEndOfInput));
