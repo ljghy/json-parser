@@ -402,6 +402,7 @@ public:
   template <typename T>
   typename std::enable_if_t<isJsonValType<T>::value, JsonNode &>
   operator=(const T &value) {
+    clear();
     m_value = value;
     return *this;
   }
@@ -409,6 +410,7 @@ public:
   template <typename T>
   typename std::enable_if_t<isJsonValType<T>::value, JsonNode &>
   operator=(T &&value) {
+    clear();
     m_value = std::move(value);
     return *this;
   }
@@ -423,6 +425,8 @@ public:
   }
 
   JsonNode &operator=(const char *str) {
+    if (str == nullptr)
+      return *this;
     if (isStr())
       *std::get<JsonStr_t *>(m_value) = str;
     else {
@@ -502,13 +506,23 @@ public:
   bool isObj() const { return type() == JsonType::Obj; }
 
   template <typename T>
-  typename std::enable_if_t<isJsonType<T>::value, T &> get() {
+  typename std::enable_if_t<isJsonValType<T>::value, T &> get() {
     return std::get<T>(m_value);
   }
 
   template <typename T>
-  typename std::enable_if_t<isJsonType<T>::value, const T> get() const {
+  typename std::enable_if_t<isJsonPtrType<T>::value, T &> get() {
+    return *std::get<T *>(m_value);
+  }
+
+  template <typename T>
+  typename std::enable_if_t<isJsonValType<T>::value, const T> get() const {
     return std::get<T>(m_value);
+  }
+
+  template <typename T>
+  typename std::enable_if_t<isJsonPtrType<T>::value, const T &> get() const {
+    return *std::get<T *>(m_value);
   }
 
   template <typename T>
