@@ -865,59 +865,82 @@ public:
   JsonNode parse(std::istream &);
 
 private:
-  class JsonInputStream {
+  template <typename Derived> class JsonInputStreamBase {
   public:
-    virtual char ch() const = 0; // peek
-    virtual void next() = 0;
-    virtual char get() = 0;
-    virtual bool eoi() const = 0; // end of input
+    char ch() const { return (static_cast<Derived *>(this))->ch(); } // peek
+    void next() { (static_cast<Derived *>(this))->next(); }
+    char get() { return (static_cast<Derived *>(this))->get(); }
+    bool eoi() const {
+      return (static_cast<Derived *>(this))->eoi();
+    } // end of input
   };
 
-  class JsonFileInputStream : public JsonInputStream {
+  class JsonFileInputStream : public JsonInputStreamBase<JsonFileInputStream> {
   public:
     JsonFileInputStream(std::istream &is) : m_is(is) {}
-    virtual char ch() const override { return m_is.peek(); }
-    virtual void next() override { m_is.get(); }
-    virtual char get() override { return m_is.get(); }
-    virtual bool eoi() const override { return m_is.eof(); }
+    char ch() const { return m_is.peek(); }
+    void next() { m_is.get(); }
+    char get() { return m_is.get(); }
+    bool eoi() const { return m_is.eof(); }
 
   private:
     std::istream &m_is;
   };
 
-  class JsonStringViewInputStream : public JsonInputStream {
+  class JsonStringViewInputStream
+      : public JsonInputStreamBase<JsonStringViewInputStream> {
   public:
     JsonStringViewInputStream(const std::string_view &input)
         : m_input(input), m_pos(input.cbegin()) {}
-    virtual char ch() const override { return *m_pos; }
-    virtual void next() override { ++m_pos; }
-    virtual char get() override { return *m_pos++; }
-    virtual bool eoi() const override { return m_pos == m_input.cend(); }
+    char ch() const { return *m_pos; }
+    void next() { ++m_pos; }
+    char get() { return *m_pos++; }
+    bool eoi() const { return m_pos == m_input.cend(); }
 
   private:
     std::string_view m_input;
     std::string_view::const_iterator m_pos;
   };
 
+  template <typename T>
+  using IsJsonInputStream = std::is_base_of<JsonInputStreamBase<T>, T>;
+
 private:
-  JsonNode parse();
+  template <typename DerivedInputStream>
+  typename std::enable_if_t<IsJsonInputStream<DerivedInputStream>::value,
+                            JsonNode>
+  parse(DerivedInputStream &);
 
-  void skipSpace();
+  template <typename DerivedInputStream> void skipSpace(DerivedInputStream &);
 
-  void parseLiteral(JsonNode *);
+  template <typename DerivedInputStream>
+  void parseLiteral(DerivedInputStream &, JsonNode *);
 
-  JsonStr_t parseString();
-  void parseEscape(JsonStr_t &);
-  void parseUtf8(JsonStr_t &);
-  uint32_t parseHex4();
+  template <typename DerivedInputStream>
+  JsonStr_t parseString(DerivedInputStream &);
+
+  template <typename DerivedInputStream>
+  void parseEscape(DerivedInputStream &, JsonStr_t &);
+
+  template <typename DerivedInputStream>
+  void parseUtf8(DerivedInputStream &, JsonStr_t &);
+
+  template <typename DerivedInputStream>
+  uint32_t parseHex4(DerivedInputStream &);
+
   void encodeUtf8(JsonStr_t &, uint32_t);
 
-  void beginArray();
-  void beginObject();
-  JsonStr_t parseKeyWithColon();
-  void handleComma();
+  template <typename DerivedInputStream> void beginArray(DerivedInputStream &);
 
-  void parseNumber(JsonNode *);
+  template <typename DerivedInputStream> void beginObject(DerivedInputStream &);
+
+  template <typename DerivedInputStream>
+  JsonStr_t parseKeyWithColon(DerivedInputStream &);
+
+  template <typename DerivedInputStream> void handleComma(DerivedInputStream &);
+
+  template <typename DerivedInputStream>
+  void parseNumber(DerivedInputStream &, JsonNode *);
 
   void popStack() {
     if (!m_nodeStack.empty())
@@ -926,17 +949,14 @@ private:
       throw std::runtime_error(getJsonErrorMsg(JsonErrorCode::InvalidJson));
   }
 
-  char ch() const { return m_is->ch(); }
-  void next() { m_is->next(); }
-  char get() { return m_is->get(); }
-  bool eoi() const { return m_is->eoi(); }
-
 private:
-  std::unique_ptr<JsonInputStream> m_is;
   std::stack<JsonNode *> m_nodeStack;
 };
 
-inline JsonNode JsonParser::parse() {
+template <typename DerivedInputStream>
+inline typename std::enable_if_t<
+    JsonParser::IsJsonInputStream<DerivedInputStream>::value, JsonNode>
+JsonParser::parse(DerivedInputStream &is) {
   m_nodeStack = {};
 
   JsonNode ret;
@@ -944,52 +964,52 @@ inline JsonNode JsonParser::parse() {
   m_nodeStack.push(&ret);
 
   while (!m_nodeStack.empty()) {
-    skipSpace();
-    if (eoi())
+    skipSpace(is);
+    if (is.eoi())
       throw std::runtime_error(
           getJsonErrorMsg(JsonErrorCode::UnexpectedEndOfInput));
 
     auto *node = m_nodeStack.top();
 
-    switch (ch()) {
+    switch (is.ch()) {
     case 'n':
     case 't':
     case 'f':
-      parseLiteral(node);
+      parseLiteral(is, node);
       popStack();
       break;
     case '"':
-      next();
-      node->m_value.emplace<JsonStr_t *>(new JsonStr_t(parseString()));
+      is.next();
+      node->m_value.emplace<JsonStr_t *>(new JsonStr_t(parseString(is)));
       popStack();
       break;
     case '[':
-      next();
-      beginArray();
+      is.next();
+      beginArray(is);
       break;
     case ']':
-      next();
+      is.next();
       if (!node->isArr())
         throw std::runtime_error(getJsonErrorMsg(JsonErrorCode::InvalidJson));
       popStack();
       break;
     case '{':
-      next();
-      beginObject();
+      is.next();
+      beginObject(is);
       break;
     case '}':
-      next();
+      is.next();
       if (!node->isObj())
         throw std::runtime_error(getJsonErrorMsg(JsonErrorCode::InvalidJson));
       popStack();
       break;
     case ',':
-      next();
-      handleComma();
+      is.next();
+      handleComma(is);
       break;
     default:
-      if (std::isdigit(ch()) || ch() == '-') {
-        parseNumber(node);
+      if (std::isdigit(is.ch()) || is.ch() == '-') {
+        parseNumber(is, node);
         popStack();
       } else {
         throw std::runtime_error(getJsonErrorMsg(JsonErrorCode::InvalidJson));
@@ -997,50 +1017,52 @@ inline JsonNode JsonParser::parse() {
     }
   }
 
-  skipSpace();
-  if (!eoi())
+  skipSpace(is);
+  if (!is.eoi())
     throw std::runtime_error(getJsonErrorMsg(JsonErrorCode::InvalidJson));
 
   return ret;
 }
 
 inline JsonNode JsonParser::parse(const std::string_view &input_view) {
-  m_is = std::make_unique<JsonStringViewInputStream>(input_view);
-  return parse();
+  auto stringViewInputStream = JsonStringViewInputStream(input_view);
+  return parse(stringViewInputStream);
 }
 
 inline JsonNode JsonParser::parse(std::istream &is) {
-  m_is = std::make_unique<JsonFileInputStream>(is);
-  return parse();
+  auto fileInputStream = JsonFileInputStream(is);
+  return parse(fileInputStream);
 }
 
-inline void JsonParser::skipSpace() {
-  while (!eoi() && std::isspace(ch())) {
-    next();
+template <typename DerivedInputStream>
+inline void JsonParser::skipSpace(DerivedInputStream &is) {
+  while (!is.eoi() && std::isspace(is.ch())) {
+    is.next();
   }
 }
 
-inline void JsonParser::parseLiteral(JsonNode *node) {
-  if (ch() == 'n') {
-    next();
-    if (!eoi() && get() == 'u' && !eoi() && get() == 'l' && !eoi() &&
-        get() == 'l') {
+template <typename DerivedInputStream>
+inline void JsonParser::parseLiteral(DerivedInputStream &is, JsonNode *node) {
+  if (is.ch() == 'n') {
+    is.next();
+    if (!is.eoi() && is.get() == 'u' && !is.eoi() && is.get() == 'l' &&
+        !is.eoi() && is.get() == 'l') {
       node->m_value.emplace<JsonNull_t>(JsonNull());
       return;
     }
   }
-  if (ch() == 't') {
-    next();
-    if (!eoi() && get() == 'r' && !eoi() && get() == 'u' && !eoi() &&
-        get() == 'e') {
+  if (is.ch() == 't') {
+    is.next();
+    if (!is.eoi() && is.get() == 'r' && !is.eoi() && is.get() == 'u' &&
+        !is.eoi() && is.get() == 'e') {
       node->m_value.emplace<bool>(true);
       return;
     }
   }
-  if (ch() == 'f') {
-    next();
-    if (!eoi() && get() == 'a' && !eoi() && get() == 'l' && !eoi() &&
-        get() == 's' && !eoi() && get() == 'e') {
+  if (is.ch() == 'f') {
+    is.next();
+    if (!is.eoi() && is.get() == 'a' && !is.eoi() && is.get() == 'l' &&
+        !is.eoi() && is.get() == 's' && !is.eoi() && is.get() == 'e') {
       node->m_value.emplace<bool>(false);
       return;
     }
@@ -1048,75 +1070,77 @@ inline void JsonParser::parseLiteral(JsonNode *node) {
   throw std::runtime_error(getJsonErrorMsg(JsonErrorCode::InvalidLiteral));
 }
 
-inline JsonStr_t JsonParser::parseString() {
+template <typename DerivedInputStream>
+inline JsonStr_t JsonParser::parseString(DerivedInputStream &is) {
   JsonStr_t ret;
 
-  while (!eoi() && ch() != '"') {
-    switch (ch()) {
+  while (!is.eoi() && is.ch() != '"') {
+    switch (is.ch()) {
     case '\\':
-      next();
-      parseEscape(ret);
+      is.next();
+      parseEscape(is, ret);
       break;
     default:
-      if (static_cast<uint8_t>(ch()) < 0x20u)
+      if (static_cast<uint8_t>(is.ch()) < 0x20u)
         throw std::runtime_error(
             getJsonErrorMsg(JsonErrorCode::InvalidCharacter));
 
-      parseUtf8(ret);
+      parseUtf8(is, ret);
     }
   }
 
-  if (eoi())
+  if (is.eoi())
     throw std::runtime_error(getJsonErrorMsg(JsonErrorCode::InvalidString));
 
-  next();
+  is.next();
   return ret;
 }
 
-inline void JsonParser::parseEscape(JsonStr_t &ret) {
-  if (eoi())
+template <typename DerivedInputStream>
+inline void JsonParser::parseEscape(DerivedInputStream &is, JsonStr_t &ret) {
+  if (is.eoi())
     throw std::runtime_error(getJsonErrorMsg(JsonErrorCode::InvalidString));
 
-  switch (ch()) {
+  switch (is.ch()) {
   case '"':
   case '\\':
   case '/':
-    ret.push_back(ch());
-    next();
+    ret.push_back(is.ch());
+    is.next();
     break;
   case 'b':
     ret.push_back('\b');
-    next();
+    is.next();
     break;
   case 'f':
     ret.push_back('\f');
-    next();
+    is.next();
     break;
   case 'n':
     ret.push_back('\n');
-    next();
+    is.next();
     break;
   case 'r':
     ret.push_back('\r');
-    next();
+    is.next();
     break;
   case 't':
     ret.push_back('\t');
-    next();
+    is.next();
     break;
   case 'u': {
-    next();
-    uint32_t u = parseHex4();
+    is.next();
+    uint32_t u = parseHex4(is);
     if (u >= 0xD800 && u <= 0xDBFF) {
-      if (eoi() || get() != '\\')
+      if (is.eoi() || is.get() != '\\')
         throw std::runtime_error(
             getJsonErrorMsg(JsonErrorCode::InvalidUnicode));
 
-      if (eoi() || get() != 'u')
+      if (is.eoi() || is.get() != 'u')
         throw std::runtime_error(
             getJsonErrorMsg(JsonErrorCode::InvalidUnicode));
 
-      uint32_t u2 = parseHex4();
+      uint32_t u2 = parseHex4(is);
       if (u2 < 0xDC00 || u2 > 0xDFFF)
         throw std::runtime_error(
             getJsonErrorMsg(JsonErrorCode::InvalidUnicode));
@@ -1131,13 +1155,14 @@ inline void JsonParser::parseEscape(JsonStr_t &ret) {
   }
 }
 
-inline uint32_t JsonParser::parseHex4() {
+template <typename DerivedInputStream>
+inline uint32_t JsonParser::parseHex4(DerivedInputStream &is) {
   uint64_t u = 0;
   for (int i = 0; i < 4; ++i) {
-    if (eoi())
+    if (is.eoi())
       throw std::runtime_error(getJsonErrorMsg(JsonErrorCode::InvalidString));
 
-    char c = get();
+    char c = is.get();
     u <<= 4;
     if (c >= '0' && c <= '9') {
       u |= c - '0';
@@ -1152,8 +1177,9 @@ inline uint32_t JsonParser::parseHex4() {
   return u;
 }
 
-inline void JsonParser::parseUtf8(JsonStr_t &ret) {
-  uint8_t u = static_cast<uint8_t>(ch()), byteCount = 0;
+template <typename DerivedInputStream>
+inline void JsonParser::parseUtf8(DerivedInputStream &is, JsonStr_t &ret) {
+  uint8_t u = static_cast<uint8_t>(is.ch()), byteCount = 0;
   if ((u <= 0x7F))
     byteCount = 1;
   else if ((u >= 0xC0) && (u <= 0xDF))
@@ -1165,11 +1191,11 @@ inline void JsonParser::parseUtf8(JsonStr_t &ret) {
   else
     throw std::runtime_error(getJsonErrorMsg(JsonErrorCode::InvalidCharacter));
 
-  ret.push_back(get());
+  ret.push_back(is.get());
   while (byteCount-- > 1) {
-    u = static_cast<uint8_t>(ch());
+    u = static_cast<uint8_t>(is.ch());
     if ((u >= 0x80) && (u <= 0xBF))
-      ret.push_back(get());
+      ret.push_back(is.get());
     else
       throw std::runtime_error(
           getJsonErrorMsg(JsonErrorCode::InvalidCharacter));
@@ -1194,67 +1220,71 @@ inline void JsonParser::encodeUtf8(JsonStr_t &ret, uint32_t u) {
   }
 }
 
-inline JsonStr_t JsonParser::parseKeyWithColon() {
-  auto key = parseString();
-  skipSpace();
-  if (eoi() || get() != ':')
+template <typename DerivedInputStream>
+inline JsonStr_t JsonParser::parseKeyWithColon(DerivedInputStream &is) {
+  auto key = parseString(is);
+  skipSpace(is);
+  if (is.eoi() || is.get() != ':')
     throw std::runtime_error(
         getJsonErrorMsg(JsonErrorCode::InvalidKeyValuePair));
 
   return key;
 }
 
-inline void JsonParser::beginArray() {
-  skipSpace();
-  if (eoi())
+template <typename DerivedInputStream>
+inline void JsonParser::beginArray(DerivedInputStream &is) {
+  skipSpace(is);
+  if (is.eoi())
     throw std::runtime_error(
         getJsonErrorMsg(JsonErrorCode::UnexpectedEndOfInput));
 
   auto *node = m_nodeStack.top();
   node->m_value.emplace<JsonArr_t *>(new JsonArr_t{});
-  if (ch() == ']') {
-    next();
+  if (is.ch() == ']') {
+    is.next();
     popStack();
   } else {
     m_nodeStack.push(&(std::get<JsonArr_t *>(node->m_value)->emplace_back()));
   }
 }
 
-inline void JsonParser::beginObject() {
-  skipSpace();
-  if (eoi())
+template <typename DerivedInputStream>
+inline void JsonParser::beginObject(DerivedInputStream &is) {
+  skipSpace(is);
+  if (is.eoi())
     throw std::runtime_error(
         getJsonErrorMsg(JsonErrorCode::UnexpectedEndOfInput));
 
   auto *node = m_nodeStack.top();
   node->m_value.emplace<JsonObj_t *>(new JsonObj_t{});
-  if (ch() == '}') {
-    next();
+  if (is.ch() == '}') {
+    is.next();
     popStack();
   } else {
-    if (get() != '"')
+    if (is.get() != '"')
       throw std::runtime_error(
           getJsonErrorMsg(JsonErrorCode::InvalidKeyValuePair));
 
-    auto key = parseKeyWithColon();
+    auto key = parseKeyWithColon(is);
     m_nodeStack.push(&(std::get<JsonObj_t *>(node->m_value)
                            ->emplace(std::move(key), JsonNode{})
                            .first->second));
   }
 }
 
-inline void JsonParser::handleComma() {
+template <typename DerivedInputStream>
+inline void JsonParser::handleComma(DerivedInputStream &is) {
   auto *node = m_nodeStack.top();
   if (node->isArr()) {
     auto &arr = *std::get<JsonArr_t *>(node->m_value);
     m_nodeStack.push(&arr.emplace_back());
   } else if (node->isObj()) {
-    skipSpace();
+    skipSpace(is);
     auto &obj = *std::get<JsonObj_t *>(node->m_value);
-    if (eoi() || get() != '"')
+    if (is.eoi() || is.get() != '"')
       throw std::runtime_error(
           getJsonErrorMsg(JsonErrorCode::UnexpectedEndOfInput));
-    auto key = parseKeyWithColon();
+    auto key = parseKeyWithColon(is);
     m_nodeStack.push(&(obj.emplace(std::move(key), JsonNode{}).first->second));
   } else {
     throw std::runtime_error(
@@ -1262,38 +1292,39 @@ inline void JsonParser::handleComma() {
   }
 }
 
-inline void JsonParser::parseNumber(JsonNode *node) {
+template <typename DerivedInputStream>
+inline void JsonParser::parseNumber(DerivedInputStream &is, JsonNode *node) {
   std::string numStr;
 
-  if (ch() == '-')
-    numStr.push_back(get());
-  if (eoi())
+  if (is.ch() == '-')
+    numStr.push_back(is.get());
+  if (is.eoi())
     throw std::runtime_error(getJsonErrorMsg(JsonErrorCode::InvalidNumber));
-  if (ch() == '0') {
-    numStr.push_back(get());
+  if (is.ch() == '0') {
+    numStr.push_back(is.get());
   } else {
-    if (!std::isdigit(ch()))
+    if (!std::isdigit(is.ch()))
       throw std::runtime_error(getJsonErrorMsg(JsonErrorCode::InvalidNumber));
-    while (!eoi() && std::isdigit(ch()))
-      numStr.push_back(get());
+    while (!is.eoi() && std::isdigit(is.ch()))
+      numStr.push_back(is.get());
   }
-  if (!eoi() && ch() == '.') {
-    numStr.push_back(get());
-    if (eoi() || !std::isdigit(ch()))
+  if (!is.eoi() && is.ch() == '.') {
+    numStr.push_back(is.get());
+    if (is.eoi() || !std::isdigit(is.ch()))
       throw std::runtime_error(getJsonErrorMsg(JsonErrorCode::InvalidNumber));
-    while (!eoi() && std::isdigit(ch()))
-      numStr.push_back(get());
+    while (!is.eoi() && std::isdigit(is.ch()))
+      numStr.push_back(is.get());
   }
-  if (!eoi() && (ch() == 'e' || ch() == 'E')) {
-    numStr.push_back(get());
-    if (eoi())
+  if (!is.eoi() && (is.ch() == 'e' || is.ch() == 'E')) {
+    numStr.push_back(is.get());
+    if (is.eoi())
       throw std::runtime_error(getJsonErrorMsg(JsonErrorCode::InvalidNumber));
-    if (ch() == '+' || ch() == '-')
-      numStr.push_back(get());
-    if (eoi() || !std::isdigit(ch()))
+    if (is.ch() == '+' || is.ch() == '-')
+      numStr.push_back(is.get());
+    if (is.eoi() || !std::isdigit(is.ch()))
       throw std::runtime_error(getJsonErrorMsg(JsonErrorCode::InvalidNumber));
-    while (!eoi() && std::isdigit(ch()))
-      numStr.push_back(get());
+    while (!is.eoi() && std::isdigit(is.ch()))
+      numStr.push_back(is.get());
   }
 
   JsonNum_t ret;
