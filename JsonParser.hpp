@@ -1,13 +1,11 @@
 #ifndef JSON_PARSER_HPP_
 #define JSON_PARSER_HPP_
 
-#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
 #include <istream>
 #include <map>
-#include <memory>
 #include <sstream>
 #include <stack>
 #include <stdexcept>
@@ -556,7 +554,15 @@ private:
     }
 
     bool operator==(const IteratorGen &rhs) const {
+#ifdef _MSC_VER
+      return m_iter.index() == rhs.m_iter.index() &&
+             ((m_iter.index() == 0 &&
+               std::get<0>(m_iter) == std::get<0>(rhs.m_iter)) ||
+              (m_iter.index() == 1 &&
+               std::get<1>(m_iter) == std::get<1>(rhs.m_iter)));
+#else
       return m_iter == rhs.m_iter;
+#endif
     }
     bool operator==(const ArrIter &rhs) const {
       return m_iter.index() == 0 && std::get<0>(m_iter) == rhs;
@@ -572,7 +578,15 @@ private:
     }
 
     bool operator!=(const IteratorGen &rhs) const {
+#ifdef _MSC_VER
+      return m_iter.index() != rhs.m_iter.index() ||
+             (m_iter.index() == 0 &&
+              std::get<0>(m_iter) != std::get<0>(rhs.m_iter)) ||
+             (m_iter.index() == 1 &&
+              std::get<1>(m_iter) != std::get<1>(rhs.m_iter));
+#else
       return m_iter != rhs.m_iter;
+#endif
     }
     bool operator!=(const ArrIter &rhs) const {
       return m_iter.index() != 0 || std::get<0>(m_iter) != rhs;
