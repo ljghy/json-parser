@@ -844,8 +844,8 @@ private:
     }
 
     if (u >= 0x10000) {
-      uint64_t l = 0xDC00 + (u & 0x3FF);
-      uint64_t u0 = ((u - 0x10000) >> 10) + 0xD800;
+      uint32_t l = 0xDC00 + (u & 0x3FF);
+      uint32_t u0 = ((u - 0x10000) >> 10) + 0xD800;
       if (u0 <= 0xDBFF) {
         return toHex4(u0) + toHex4(l);
       }
@@ -1171,7 +1171,7 @@ inline void JsonParser::parseEscape(DerivedInputStream &is, JsonStr_t &ret) {
 
 template <typename DerivedInputStream>
 inline uint32_t JsonParser::parseHex4(DerivedInputStream &is) {
-  uint64_t u = 0;
+  uint32_t u = 0;
   for (int i = 0; i < 4; ++i) {
     if (is.eoi())
       throw std::runtime_error(getJsonErrorMsg(JsonErrorCode::InvalidString));
