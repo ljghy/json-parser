@@ -104,11 +104,11 @@ private:
       JsonObj_t::iterator objIt;
     };
 
-    TraverseState(JsonNode *node) : node(node) {
-      if (node->isArr())
-        arrIt = std::get<JsonArr_t *>(node->m_value)->begin();
-      else if (node->isObj())
-        objIt = std::get<JsonObj_t *>(node->m_value)->begin();
+    TraverseState(JsonNode *n) : node(n) {
+      if (n->isArr())
+        arrIt = std::get<JsonArr_t *>(n->m_value)->begin();
+      else if (n->isObj())
+        objIt = std::get<JsonObj_t *>(n->m_value)->begin();
     }
   };
 
@@ -119,11 +119,11 @@ private:
       JsonObj_t::const_iterator objIt;
     };
 
-    ConstTraverseState(const JsonNode *node) : node(node) {
-      if (node->isArr())
-        arrIt = std::get<JsonArr_t *>(node->m_value)->cbegin();
-      else if (node->isObj())
-        objIt = std::get<JsonObj_t *>(node->m_value)->cbegin();
+    ConstTraverseState(const JsonNode *n) : node(n) {
+      if (n->isArr())
+        arrIt = std::get<JsonArr_t *>(n->m_value)->cbegin();
+      else if (n->isObj())
+        objIt = std::get<JsonObj_t *>(n->m_value)->cbegin();
     }
   };
 
