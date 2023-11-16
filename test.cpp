@@ -8,7 +8,11 @@ int main() {
   JsonParser parser;
   JsonNode json;
   std::string dir = "tests/JSONTestSuite/test_parsing/";
+
+  int totalTests = 0;
+  int passedTests = 0;
   for (const auto &dirEntry : std::filesystem::directory_iterator(dir)) {
+    ++totalTests;
     std::stringstream ss;
     ss << dirEntry;
     bool success = true;
@@ -23,6 +27,9 @@ int main() {
     }
     if ((success && filename[0] == 'n') || (!success && filename[0] == 'y')) {
       std::cerr << "Unexpected parsing result: " << filename << '\n';
+    } else {
+      ++passedTests;
     }
   }
+  std::cerr << "Passed " << passedTests << " out of " << totalTests << '\n';
 }
