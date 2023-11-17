@@ -1050,7 +1050,8 @@ inline JsonNode JsonParser::parse(std::istream &is) {
 
 template <typename DerivedInputStream>
 inline void JsonParser::skipSpace(DerivedInputStream &is) {
-  while (!is.eoi() && std::isspace(is.ch())) {
+  while (!is.eoi() && (is.ch() == ' ' || is.ch() == '\t' || is.ch() == '\n' ||
+                       is.ch() == '\r')) {
     is.next();
   }
 }
