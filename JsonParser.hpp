@@ -68,23 +68,25 @@ inline const char *getJsonErrorMsg(JsonErrorCode code) {
   return JsonErrorMsg[static_cast<uint8_t>(code)];
 }
 
-template <typename T>
-inline T strToJsonNum_t(const std::string &, size_t *idx) {
+namespace detail {
+template <typename T> inline T strToJsonNum(const std::string &, size_t *idx) {
   return T{};
 }
 template <>
-inline double strToJsonNum_t<double>(const std::string &str, size_t *idx) {
+inline double strToJsonNum<double>(const std::string &str, size_t *idx) {
   return std::stod(str, idx);
 }
 template <>
-inline float strToJsonNum_t<float>(const std::string &str, size_t *idx) {
+inline float strToJsonNum<float>(const std::string &str, size_t *idx) {
   return std::stof(str, idx);
 }
 template <>
-inline long double strToJsonNum_t<long double>(const std::string &str,
-                                               size_t *idx) {
+inline long double strToJsonNum<long double>(const std::string &str,
+                                             size_t *idx) {
   return std::stold(str, idx);
 }
+}; // namespace detail
+
 class JsonNode {
   friend class JsonParser;
 
@@ -159,6 +161,10 @@ public:
   template <typename T, typename = std::enable_if_t<!isJsonType<T>::value &&
                                                     std::is_arithmetic_v<T>>>
   JsonNode(T num) : m_value(static_cast<JsonNum_t>(num)) {}
+
+  JsonNode(std::nullptr_t) : m_value(JsonNull) {}
+
+  JsonNode(char c) : m_value(new JsonStr_t(1, c)) {}
 
   JsonNode(const char *str) : m_value(new JsonStr_t(str)) {}
 
@@ -416,9 +422,23 @@ public:
     return *this;
   }
 
+  JsonNode &operator=(std::nullptr_t) {
+    clear();
+    m_value = JsonNull;
+    return *this;
+  }
+
+  JsonNode &operator=(char c) {
+    if (isStr())
+      *std::get<JsonStr_t *>(m_value) = c;
+    else {
+      clear();
+      m_value = new JsonStr_t(1, c);
+    }
+    return *this;
+  }
+
   JsonNode &operator=(const char *str) {
-    if (str == nullptr)
-      return *this;
     if (isStr())
       *std::get<JsonStr_t *>(m_value) = str;
     else {
@@ -1340,7 +1360,7 @@ inline void JsonParser::parseNumber(DerivedInputStream &is, JsonNode *node) {
   size_t idx = 0;
 
   try {
-    ret = strToJsonNum_t<JsonNum_t>(numStr, &idx);
+    ret = detail::strToJsonNum<JsonNum_t>(numStr, &idx);
   } catch (const std::invalid_argument &) {
     throw std::runtime_error(getJsonErrorMsg(JsonErrorCode::InvalidNumber));
   } catch (const std::out_of_range &) {
