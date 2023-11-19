@@ -343,30 +343,30 @@ public:
 
     switch (other.type()) {
     case JsonType::Arr: {
-      const auto &otherArr = *std::get<JsonArr_t *>(other.m_value);
+      auto otherArr = *std::get<JsonArr_t *>(other.m_value);
       if (isArr())
-        *std::get<JsonArr_t *>(m_value) = otherArr;
+        *std::get<JsonArr_t *>(m_value) = std::move(otherArr);
       else {
         clear();
-        m_value = new JsonArr_t(otherArr);
+        m_value = new JsonArr_t(std::move(otherArr));
       }
     } break;
     case JsonType::Obj: {
-      const auto &otherObj = *std::get<JsonObj_t *>(other.m_value);
+      auto otherObj = *std::get<JsonObj_t *>(other.m_value);
       if (isObj())
-        *std::get<JsonObj_t *>(m_value) = otherObj;
+        *std::get<JsonObj_t *>(m_value) = std::move(otherObj);
       else {
         clear();
-        m_value = new JsonObj_t(otherObj);
+        m_value = new JsonObj_t(std::move(otherObj));
       }
     } break;
     case JsonType::Str: {
-      const auto &otherStr = *std::get<JsonStr_t *>(other.m_value);
+      auto otherStr = *std::get<JsonStr_t *>(other.m_value);
       if (isStr())
-        *std::get<JsonStr_t *>(m_value) = otherStr;
+        *std::get<JsonStr_t *>(m_value) = std::move(otherStr);
       else {
         clear();
-        m_value = new JsonStr_t(otherStr);
+        m_value = new JsonStr_t(std::move(otherStr));
       }
     } break;
     default:
