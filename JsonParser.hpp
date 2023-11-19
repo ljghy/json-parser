@@ -15,14 +15,8 @@
 #include <variant>
 #include <vector>
 
-struct JsonNull_t {
-  friend constexpr JsonNull_t JsonNull();
-
-private:
-  JsonNull_t() = default;
-};
-
-inline constexpr JsonNull_t JsonNull() { return JsonNull_t{}; }
+inline constexpr struct JsonNull_t {
+} JsonNull;
 
 class JsonNode;
 
@@ -225,7 +219,7 @@ public:
         }
       } break;
       case JsonType::Null:
-        nodeStack.top()->m_value.emplace<JsonNull_t>(JsonNull());
+        nodeStack.top()->m_value.emplace<JsonNull_t>(JsonNull);
         stateStack.pop();
         nodeStack.pop();
         break;
@@ -1062,7 +1056,7 @@ inline void JsonParser::parseLiteral(DerivedInputStream &is, JsonNode *node) {
     is.next();
     if (!is.eoi() && is.get() == 'u' && !is.eoi() && is.get() == 'l' &&
         !is.eoi() && is.get() == 'l') {
-      node->m_value.emplace<JsonNull_t>(JsonNull());
+      node->m_value.emplace<JsonNull_t>(JsonNull);
       return;
     }
   }
