@@ -65,5 +65,10 @@ int main() {
   std::cout << "Empty array: " << JsonNode(JsonArr_t{}).toString() << std::endl;
   std::cout << "Empty object: " << JsonNode(JsonObj_t{}).toString()
             << std::endl;
+
+  JsonNode json6{3.14159, 2.71828};
+  std::cout.precision(4);
+  json6.stringify(std::cout);
+  std::cout << std::endl;
 }
 ```

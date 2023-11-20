@@ -724,53 +724,52 @@ public:
   }
 
 public:
-  std::string toString(size_t indent = -1, bool ascii = true) const {
+  void stringify(std::ostream &os, size_t indent = -1,
+                 bool ascii = true) const {
 
     bool formatted = (indent != static_cast<size_t>(-1));
 
     std::stack<ConstTraverseState> stateStack;
     stateStack.emplace(this);
 
-    std::stringstream ss;
-
     while (!stateStack.empty()) {
       auto node = stateStack.top().node;
       switch (node->type()) {
       case JsonType::Null:
-        ss << "null";
+        os << "null";
         stateStack.pop();
         break;
       case JsonType::Bool:
-        ss << (node->get<bool>() ? "true" : "false");
+        os << (node->get<bool>() ? "true" : "false");
         stateStack.pop();
         break;
       case JsonType::Num:
-        ss << node->get<JsonNum_t>();
+        os << node->get<JsonNum_t>();
         stateStack.pop();
         break;
       case JsonType::Str:
-        ss << "\"" << toJsonString(*std::get<JsonStr_t *>(node->m_value), ascii)
+        os << "\"" << toJsonString(*std::get<JsonStr_t *>(node->m_value), ascii)
            << "\"";
         stateStack.pop();
         break;
       case JsonType::Arr: {
         const auto &arr = *std::get<JsonArr_t *>(node->m_value);
         if (arr.empty()) {
-          ss << "[]";
+          os << "[]";
           stateStack.pop();
           break;
         }
         auto &it = stateStack.top().arrIt;
         if (it == arr.cbegin()) {
           if (formatted)
-            ss << "[\n" << std::string(indent * stateStack.size(), ' ');
+            os << "[\n" << std::string(indent * stateStack.size(), ' ');
           else
-            ss << '[';
+            os << '[';
         } else if (it != arr.cend()) {
           if (formatted)
-            ss << ",\n" << std::string(indent * stateStack.size(), ' ');
+            os << ",\n" << std::string(indent * stateStack.size(), ' ');
           else
-            ss << ',';
+            os << ',';
         }
         if (it != arr.cend()) {
           const auto child = &(*it);
@@ -778,44 +777,44 @@ public:
           stateStack.emplace(child);
         } else {
           if (formatted)
-            ss << '\n'
+            os << '\n'
                << std::string(indent * (stateStack.size() - 1), ' ') << ']';
           else
-            ss << ']';
+            os << ']';
           stateStack.pop();
         }
       } break;
       case JsonType::Obj: {
         const auto &obj = *std::get<JsonObj_t *>(node->m_value);
         if (obj.empty()) {
-          ss << "{}";
+          os << "{}";
           stateStack.pop();
           break;
         }
         auto &it = stateStack.top().objIt;
         if (it == obj.cbegin()) {
           if (formatted)
-            ss << "{\n" << std::string(indent * stateStack.size(), ' ');
+            os << "{\n" << std::string(indent * stateStack.size(), ' ');
           else
-            ss << '{';
+            os << '{';
         } else if (it != obj.cend()) {
           if (formatted)
-            ss << ",\n" << std::string(indent * stateStack.size(), ' ');
+            os << ",\n" << std::string(indent * stateStack.size(), ' ');
           else
-            ss << ',';
+            os << ',';
         }
 
         if (it != obj.cend()) {
-          ss << "\"" << toJsonString(it->first, ascii) << "\":";
+          os << "\"" << toJsonString(it->first, ascii) << "\":";
           const auto child = &(it->second);
           ++it;
           stateStack.emplace(child);
         } else {
           if (formatted)
-            ss << '\n'
+            os << '\n'
                << std::string(indent * (stateStack.size() - 1), ' ') << '}';
           else
-            ss << '}';
+            os << '}';
           stateStack.pop();
         }
       } break;
@@ -824,6 +823,11 @@ public:
         break;
       }
     }
+  }
+
+  std::string toString(size_t indent = -1, bool ascii = true) const {
+    std::stringstream ss;
+    stringify(ss, indent, ascii);
     return ss.str();
   }
 
