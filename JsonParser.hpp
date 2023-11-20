@@ -7,6 +7,7 @@
 #include <initializer_list>
 #include <iomanip>
 #include <istream>
+#include <limits>
 #include <map>
 #include <sstream>
 #include <stack>
@@ -28,7 +29,154 @@ inline constexpr struct JsonNull_t {
 
 class JsonNode;
 
-using JsonNum_t = double;
+namespace detail {
+template <typename T> struct isSignedIntegral {
+  static constexpr bool value =
+      std::is_integral<T>::value && std::is_signed<T>::value;
+};
+
+template <typename T> struct isUnsignedIntegral {
+  static constexpr bool value =
+      std::is_integral<T>::value && std::is_unsigned<T>::value;
+};
+} // namespace detail
+
+class JsonNum_t {
+public:
+  JsonNum_t() : d(0.0), ty('d') {}
+
+  template <typename T, typename std::enable_if_t<
+                            std::is_floating_point<T>::value, int> = 0>
+  JsonNum_t(T d) : d(d), ty('d') {}
+
+  template <typename T, typename std::enable_if_t<
+                            detail::isSignedIntegral<T>::value, int> = 0>
+  JsonNum_t(T i) : i(i), ty('i') {}
+
+  template <typename T, typename std::enable_if_t<
+                            detail::isUnsignedIntegral<T>::value, int> = 0>
+  JsonNum_t(T u) : u(u), ty('u') {}
+
+  template <typename T,
+            typename std::enable_if_t<std::is_floating_point_v<T>, int> = 0>
+  JsonNum_t &operator=(T d) {
+    this->d = d;
+    ty = 'd';
+    return *this;
+  }
+
+  template <typename T, typename std::enable_if_t<
+                            detail::isSignedIntegral<T>::value, int> = 0>
+  JsonNum_t &operator=(T i) {
+    this->i = i;
+    ty = 'i';
+    return *this;
+  }
+
+  template <typename T, typename std::enable_if_t<
+                            detail::isUnsignedIntegral<T>::value, int> = 0>
+  JsonNum_t &operator=(T u) {
+    this->u = u;
+    ty = 'u';
+    return *this;
+  }
+
+  template <typename T,
+            typename std::enable_if_t<std::is_arithmetic_v<T>, int> = 0>
+  operator T() const {
+    switch (ty) {
+    case 'd':
+      return static_cast<T>(d);
+    case 'i':
+      return static_cast<T>(i);
+    case 'u':
+      return static_cast<T>(u);
+    }
+    return T{};
+  }
+
+  friend std::ostream &operator<<(std::ostream &os, const JsonNum_t &num) {
+    switch (num.ty) {
+    case 'd':
+      os << num.d;
+      break;
+    case 'i':
+      os << num.i;
+      break;
+    case 'u':
+      os << num.u;
+      break;
+    }
+    return os;
+  }
+
+  std::from_chars_result fromChars(std::string_view numStr,
+                                   bool isFloatingPoint, bool isSigned) {
+    if (isFloatingPoint) {
+      ty = 'd';
+      return std::from_chars(numStr.data(), numStr.data() + numStr.size(), d);
+    } else if (isSigned) {
+      constexpr std::string_view maxSignedIntStr =
+          "9223372036854775808"; // 2^63
+      size_t unsignedLen = numStr.size() - 1;
+      bool overflow = false;
+      if (unsignedLen == maxSignedIntStr.size()) {
+        for (size_t i = 0; i < maxSignedIntStr.size(); ++i) {
+          if (numStr[i + 1] > maxSignedIntStr[i]) {
+            overflow = true;
+            break;
+          } else if (numStr[i + 1] < maxSignedIntStr[i]) {
+            break;
+          }
+        }
+      } else {
+        overflow = unsignedLen > maxSignedIntStr.size();
+      }
+
+      if (overflow) {
+        ty = 'd';
+        return std::from_chars(numStr.data(), numStr.data() + numStr.size(), d);
+      } else {
+        ty = 'i';
+        return std::from_chars(numStr.data(), numStr.data() + numStr.size(), i);
+      }
+
+    } else {
+      constexpr std::string_view maxUnsignedIntStr =
+          "18446744073709551615"; // 2^64 - 1
+      bool overflow = false;
+      if (numStr.size() == maxUnsignedIntStr.size()) {
+        for (size_t i = 0; i < maxUnsignedIntStr.size(); ++i) {
+          if (numStr[i] > maxUnsignedIntStr[i]) {
+            overflow = true;
+            break;
+          } else if (numStr[i] < maxUnsignedIntStr[i]) {
+            break;
+          }
+        }
+      } else {
+        overflow = numStr.size() > maxUnsignedIntStr.size();
+      }
+
+      if (overflow) {
+        ty = 'd';
+        return std::from_chars(numStr.data(), numStr.data() + numStr.size(), d);
+      } else {
+        ty = 'u';
+        return std::from_chars(numStr.data(), numStr.data() + numStr.size(), u);
+      }
+    }
+  }
+
+private:
+  union {
+    double d;
+    int64_t i;
+    uint64_t u;
+  };
+  char ty;
+};
+
 using JsonStr_t = std::string;
 using JsonArr_t = std::vector<JsonNode>;
 using JsonObj_t = std::map<std::string, JsonNode>;
@@ -1352,8 +1500,13 @@ template <typename DerivedInputStream>
 inline void JsonParser::parseNumber(DerivedInputStream &is, JsonNode *node) {
   std::string numStr;
 
-  if (is.ch() == '-')
+  bool isSigned = false;
+  bool isFloatingPoint = false;
+
+  if (is.ch() == '-') {
+    isSigned = true;
     numStr.push_back(is.get());
+  }
   if (is.eoi())
     throw std::runtime_error(
         getJsonErrorMsg(detail::JsonErrorCode::InvalidNumber));
@@ -1367,6 +1520,7 @@ inline void JsonParser::parseNumber(DerivedInputStream &is, JsonNode *node) {
       numStr.push_back(is.get());
   }
   if (!is.eoi() && is.ch() == '.') {
+    isFloatingPoint = true;
     numStr.push_back(is.get());
     if (is.eoi() || !std::isdigit(is.ch()))
       throw std::runtime_error(
@@ -1375,6 +1529,7 @@ inline void JsonParser::parseNumber(DerivedInputStream &is, JsonNode *node) {
       numStr.push_back(is.get());
   }
   if (!is.eoi() && (is.ch() == 'e' || is.ch() == 'E')) {
+    isFloatingPoint = true;
     numStr.push_back(is.get());
     if (is.eoi())
       throw std::runtime_error(
@@ -1389,8 +1544,7 @@ inline void JsonParser::parseNumber(DerivedInputStream &is, JsonNode *node) {
   }
 
   JsonNum_t num;
-  auto result =
-      std::from_chars(numStr.data(), numStr.data() + numStr.size(), num);
+  auto result = num.fromChars(numStr, isFloatingPoint, isSigned);
   if (result.ec != std::errc{})
     throw std::runtime_error(
         getJsonErrorMsg(detail::JsonErrorCode::InvalidNumber));
