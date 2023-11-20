@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
+#include <iomanip>
 #include <istream>
 #include <map>
 #include <sstream>
@@ -747,12 +748,12 @@ public:
         auto &it = stateStack.top().arrIt;
         if (it == arr.cbegin()) {
           if (formatted)
-            os << "[\n" << std::string(indent * stateStack.size(), ' ');
+            os << "[\n" << std::setw(indent * stateStack.size()) << ' ';
           else
             os << '[';
         } else if (it != arr.cend()) {
           if (formatted)
-            os << ",\n" << std::string(indent * stateStack.size(), ' ');
+            os << ",\n" << std::setw(indent * stateStack.size()) << ' ';
           else
             os << ',';
         }
@@ -779,12 +780,12 @@ public:
         auto &it = stateStack.top().objIt;
         if (it == obj.cbegin()) {
           if (formatted)
-            os << "{\n" << std::string(indent * stateStack.size(), ' ');
+            os << "{\n" << std::setw(indent * stateStack.size()) << ' ';
           else
             os << '{';
         } else if (it != obj.cend()) {
           if (formatted)
-            os << ",\n" << std::string(indent * stateStack.size(), ' ');
+            os << ",\n" << std::setw(indent * stateStack.size()) << ' ';
           else
             os << ',';
         }
