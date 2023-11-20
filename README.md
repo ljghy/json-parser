@@ -68,7 +68,7 @@ int main() {
 
   JsonNode json6{3.14159, 2.71828};
   std::cout.precision(4);
-  json6.stringify(std::cout);
+  json6.dump(std::cout);
   std::cout << std::endl;
 }
 ```

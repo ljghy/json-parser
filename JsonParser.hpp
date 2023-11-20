@@ -724,7 +724,7 @@ public:
   }
 
 public:
-  void stringify(std::ostream &os, size_t indent = -1,
+  void dump(std::ostream &os, size_t indent = -1,
                  bool ascii = true) const {
 
     bool formatted = (indent != static_cast<size_t>(-1));
@@ -827,7 +827,7 @@ public:
 
   std::string toString(size_t indent = -1, bool ascii = true) const {
     std::stringstream ss;
-    stringify(ss, indent, ascii);
+    dump(ss, indent, ascii);
     return ss.str();
   }
 
