@@ -15,6 +15,12 @@
 #include <variant>
 #include <vector>
 
+// #define JSON_ENABLE_EMPTY_NODE
+// If JSON_ENABLE_EMPTY_NODE is defined, JsonNode can be empty to distinguish
+// from null. Otherwise, JsonNode is null by default.
+// Note that empty values are not valid json values and need to be cleared
+// manually before calling toString() or size() in order to get correct results.
+
 inline constexpr struct JsonNull_t {
 } JsonNull;
 
@@ -34,14 +40,24 @@ inline JsonKeyLiteral_t operator""_key(const char *key, size_t len) {
 }
 
 enum class JsonType : uint8_t {
+#ifdef JSON_ENABLE_EMPTY_NODE
   Empty = 0,
   Null,
+#else
+  Null = 0,
+#endif
   Bool,
   Num,
   Str,
   Arr,
   Obj,
 };
+
+#ifdef JSON_ENABLE_EMPTY_NODE
+inline constexpr auto JsonEmptyValue = std::monostate{};
+#else
+inline constexpr auto JsonEmptyValue = JsonNull;
+#endif
 
 enum class JsonErrorCode : uint8_t {
   InvalidJson = 0,
@@ -267,14 +283,16 @@ public:
     default:
       m_value = other.m_value;
     }
-    other.m_value = std::monostate{};
+    other.m_value = JsonEmptyValue;
   }
 
   // Destructor
 
   ~JsonNode() {
+#ifdef JSON_ENABLE_EMPTY_NODE
     if (isEmpty())
       return;
+#endif
 
     std::stack<TraverseState> stateStack;
     stateStack.emplace(this);
@@ -290,7 +308,7 @@ public:
           stateStack.emplace(child);
         } else {
           delete arr;
-          node->m_value = std::monostate{};
+          node->m_value = JsonEmptyValue;
           stateStack.pop();
         }
       } break;
@@ -303,17 +321,17 @@ public:
           stateStack.emplace(child);
         } else {
           delete obj;
-          node->m_value = std::monostate{};
+          node->m_value = JsonEmptyValue;
           stateStack.pop();
         }
       } break;
       case JsonType::Str:
         delete std::get<JsonStr_t *>(node->m_value);
-        node->m_value = std::monostate{};
+        node->m_value = JsonEmptyValue;
         stateStack.pop();
         break;
       default:
-        node->m_value = std::monostate{};
+        node->m_value = JsonEmptyValue;
         stateStack.pop();
       }
     }
@@ -333,7 +351,7 @@ public:
     default:
       break;
     }
-    m_value = std::monostate{};
+    m_value = JsonEmptyValue;
   }
 
   // Assignment operators
@@ -393,7 +411,7 @@ public:
     default:
       m_value = other.m_value;
     }
-    other.m_value = std::monostate{};
+    other.m_value = JsonEmptyValue;
     return *this;
   }
 
@@ -509,7 +527,10 @@ public:
     return types[m_value.index()];
   }
 
+#ifdef JSON_ENABLE_EMPTY_NODE
   bool isEmpty() const { return type() == JsonType::Empty; }
+#endif
+
   bool isNull() const { return type() == JsonType::Null; }
   bool isBool() const { return type() == JsonType::Bool; }
   bool isNum() const { return type() == JsonType::Num; }
@@ -878,8 +899,13 @@ private:
   }
 
 private:
+#ifdef JSON_ENABLE_EMPTY_NODE
   std::variant<std::monostate, JsonNull_t, bool, JsonNum_t, JsonStr_t *,
                JsonArr_t *, JsonObj_t *>
+#else
+  std::variant<JsonNull_t, bool, JsonNum_t, JsonStr_t *, JsonArr_t *,
+               JsonObj_t *>
+#endif
       m_value;
 };
 
