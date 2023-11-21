@@ -29,154 +29,6 @@ inline constexpr struct JsonNull_t {
 
 class JsonNode;
 
-namespace detail {
-template <typename T> struct isSignedIntegral {
-  static constexpr bool value =
-      std::is_integral<T>::value && std::is_signed<T>::value;
-};
-
-template <typename T> struct isUnsignedIntegral {
-  static constexpr bool value =
-      std::is_integral<T>::value && std::is_unsigned<T>::value;
-};
-} // namespace detail
-
-class JsonNum_t {
-public:
-  JsonNum_t() : d(0.0), ty('d') {}
-
-  template <typename T, typename std::enable_if_t<
-                            std::is_floating_point<T>::value, int> = 0>
-  JsonNum_t(T d) : d(d), ty('d') {}
-
-  template <typename T, typename std::enable_if_t<
-                            detail::isSignedIntegral<T>::value, int> = 0>
-  JsonNum_t(T i) : i(i), ty('i') {}
-
-  template <typename T, typename std::enable_if_t<
-                            detail::isUnsignedIntegral<T>::value, int> = 0>
-  JsonNum_t(T u) : u(u), ty('u') {}
-
-  template <typename T,
-            typename std::enable_if_t<std::is_floating_point_v<T>, int> = 0>
-  JsonNum_t &operator=(T d) {
-    this->d = d;
-    ty = 'd';
-    return *this;
-  }
-
-  template <typename T, typename std::enable_if_t<
-                            detail::isSignedIntegral<T>::value, int> = 0>
-  JsonNum_t &operator=(T i) {
-    this->i = i;
-    ty = 'i';
-    return *this;
-  }
-
-  template <typename T, typename std::enable_if_t<
-                            detail::isUnsignedIntegral<T>::value, int> = 0>
-  JsonNum_t &operator=(T u) {
-    this->u = u;
-    ty = 'u';
-    return *this;
-  }
-
-  template <typename T,
-            typename std::enable_if_t<std::is_arithmetic_v<T>, int> = 0>
-  operator T() const {
-    switch (ty) {
-    case 'd':
-      return static_cast<T>(d);
-    case 'i':
-      return static_cast<T>(i);
-    case 'u':
-      return static_cast<T>(u);
-    }
-    return T{};
-  }
-
-  friend std::ostream &operator<<(std::ostream &os, const JsonNum_t &num) {
-    switch (num.ty) {
-    case 'd':
-      os << num.d;
-      break;
-    case 'i':
-      os << num.i;
-      break;
-    case 'u':
-      os << num.u;
-      break;
-    }
-    return os;
-  }
-
-  std::from_chars_result fromChars(std::string_view numStr,
-                                   bool isFloatingPoint, bool isSigned) {
-    if (isFloatingPoint) {
-      ty = 'd';
-      return std::from_chars(numStr.data(), numStr.data() + numStr.size(), d);
-    } else if (isSigned) {
-      constexpr std::string_view maxSignedIntStr =
-          "9223372036854775808"; // 2^63
-      size_t unsignedLen = numStr.size() - 1;
-      bool overflow = false;
-      if (unsignedLen == maxSignedIntStr.size()) {
-        for (size_t i = 0; i < maxSignedIntStr.size(); ++i) {
-          if (numStr[i + 1] > maxSignedIntStr[i]) {
-            overflow = true;
-            break;
-          } else if (numStr[i + 1] < maxSignedIntStr[i]) {
-            break;
-          }
-        }
-      } else {
-        overflow = unsignedLen > maxSignedIntStr.size();
-      }
-
-      if (overflow) {
-        ty = 'd';
-        return std::from_chars(numStr.data(), numStr.data() + numStr.size(), d);
-      } else {
-        ty = 'i';
-        return std::from_chars(numStr.data(), numStr.data() + numStr.size(), i);
-      }
-
-    } else {
-      constexpr std::string_view maxUnsignedIntStr =
-          "18446744073709551615"; // 2^64 - 1
-      bool overflow = false;
-      if (numStr.size() == maxUnsignedIntStr.size()) {
-        for (size_t i = 0; i < maxUnsignedIntStr.size(); ++i) {
-          if (numStr[i] > maxUnsignedIntStr[i]) {
-            overflow = true;
-            break;
-          } else if (numStr[i] < maxUnsignedIntStr[i]) {
-            break;
-          }
-        }
-      } else {
-        overflow = numStr.size() > maxUnsignedIntStr.size();
-      }
-
-      if (overflow) {
-        ty = 'd';
-        return std::from_chars(numStr.data(), numStr.data() + numStr.size(), d);
-      } else {
-        ty = 'u';
-        return std::from_chars(numStr.data(), numStr.data() + numStr.size(), u);
-      }
-    }
-  }
-
-private:
-  union {
-    double d;
-    int64_t i;
-    uint64_t u;
-  };
-  char ty;
-};
-
 using JsonStr_t = std::string;
 using JsonArr_t = std::vector<JsonNode>;
 using JsonObj_t = std::map<std::string, JsonNode>;
@@ -272,18 +124,16 @@ private:
     }
   };
 
-private:
   template <typename T> struct isJsonType {
     static constexpr bool value =
         std::is_same_v<T, JsonNull_t> || std::is_same_v<T, bool> ||
-        std::is_same_v<T, JsonNum_t> || std::is_same_v<T, JsonStr_t> ||
-        std::is_same_v<T, JsonArr_t> || std::is_same_v<T, JsonObj_t>;
+        std::is_same_v<T, JsonStr_t> || std::is_same_v<T, JsonArr_t> ||
+        std::is_same_v<T, JsonObj_t>;
   };
 
   template <typename T> struct isJsonValType {
-    static constexpr bool value = std::is_same_v<T, JsonNull_t> ||
-                                  std::is_same_v<T, bool> ||
-                                  std::is_same_v<T, JsonNum_t>;
+    static constexpr bool value =
+        std::is_same_v<T, JsonNull_t> || std::is_same_v<T, bool>;
   };
 
   template <typename T> struct isJsonPtrType {
@@ -292,15 +142,28 @@ private:
                                   std::is_same_v<T, JsonObj_t>;
   };
 
-public:
-  // Constructors
+  template <typename T> struct isSignedIntegral {
+    static constexpr bool value =
+        std::is_integral_v<T> && std::is_signed_v<T> &&
+        !std::is_same_v<T, char> && !std::is_same_v<T, bool>;
+  };
 
+  template <typename T> struct isUnsignedIntegral {
+    static constexpr bool value =
+        std::is_integral<T>::value && std::is_unsigned<T>::value &&
+        !std::is_same_v<T, char> && !std::is_same_v<T, bool>;
+  };
+
+  // Constructors
+public:
   JsonNode() = default;
 
-  template <typename T, typename = std::enable_if_t<isJsonValType<T>::value>>
+  template <typename T,
+            typename std::enable_if_t<isJsonValType<T>::value, int> = 0>
   JsonNode(const T &value) : m_value(value) {}
 
-  template <typename T, typename = std::enable_if_t<isJsonValType<T>::value>>
+  template <typename T,
+            typename std::enable_if_t<isJsonValType<T>::value, int> = 0>
   JsonNode(T &&value) : m_value(value) {}
 
   JsonNode(const JsonArr_t &arr) : m_value(new JsonArr_t(arr)) {}
@@ -309,9 +172,17 @@ public:
   JsonNode(const JsonObj_t &obj) : m_value(new JsonObj_t(obj)) {}
   JsonNode(JsonObj_t &&obj) : m_value(new JsonObj_t(std::move(obj))) {}
 
-  template <typename T, typename = std::enable_if_t<!isJsonType<T>::value &&
-                                                    std::is_arithmetic_v<T>>>
-  JsonNode(T num) : m_value(static_cast<JsonNum_t>(num)) {}
+  template <typename T,
+            typename std::enable_if_t<std::is_floating_point_v<T>, int> = 0>
+  JsonNode(T num) : m_value(static_cast<double>(num)) {}
+
+  template <typename T,
+            typename std::enable_if_t<isSignedIntegral<T>::value, int> = 0>
+  JsonNode(T num) : m_value(static_cast<int64_t>(num)) {}
+
+  template <typename T,
+            typename std::enable_if_t<isUnsignedIntegral<T>::value, int> = 0>
+  JsonNode(T num) : m_value(static_cast<uint64_t>(num)) {}
 
   JsonNode(std::nullptr_t) : m_value(JsonNull) {}
 
@@ -375,22 +246,6 @@ public:
           nodeStack.pop();
         }
       } break;
-      case JsonType::Null:
-        nodeStack.top()->m_value.emplace<JsonNull_t>(JsonNull);
-        stateStack.pop();
-        nodeStack.pop();
-        break;
-      case JsonType::Bool:
-        nodeStack.top()->m_value.emplace<bool>(otherNode->get<bool>());
-        stateStack.pop();
-        nodeStack.pop();
-        break;
-      case JsonType::Num:
-        nodeStack.top()->m_value.emplace<JsonNum_t>(
-            otherNode->get<JsonNum_t>());
-        stateStack.pop();
-        nodeStack.pop();
-        break;
       case JsonType::Str:
         nodeStack.top()->m_value.emplace<JsonStr_t *>(
             new JsonStr_t(*std::get<JsonStr_t *>(otherNode->m_value)));
@@ -398,6 +253,7 @@ public:
         nodeStack.pop();
         break;
       default:
+        nodeStack.top()->m_value = otherNode->m_value;
         stateStack.pop();
         nodeStack.pop();
       }
@@ -422,7 +278,7 @@ public:
   }
 
   // Destructor
-
+public:
   ~JsonNode() {
 #ifdef JSON_ENABLE_EMPTY_NODE
     if (isEmpty())
@@ -490,6 +346,7 @@ public:
   }
 
   // Assignment operators
+public:
   JsonNode &operator=(const JsonNode &other) {
     if (this == &other)
       return *this;
@@ -567,11 +424,26 @@ public:
   }
 
   template <typename T>
-  typename std::enable_if_t<!(isJsonType<T>::value) && std::is_arithmetic_v<T>,
-                            JsonNode &>
+  typename std::enable_if_t<std::is_floating_point_v<T>, JsonNode &>
   operator=(T value) {
     clear();
-    m_value = static_cast<JsonNum_t>(value);
+    m_value = static_cast<double>(value);
+    return *this;
+  }
+
+  template <typename T>
+  typename std::enable_if_t<isSignedIntegral<T>::value, JsonNode &>
+  operator=(T value) {
+    clear();
+    m_value = static_cast<int64_t>(value);
+    return *this;
+  }
+
+  template <typename T>
+  typename std::enable_if_t<isUnsignedIntegral<T>::value, JsonNode &>
+  operator=(T value) {
+    clear();
+    m_value = static_cast<uint64_t>(value);
     return *this;
   }
 
@@ -602,7 +474,7 @@ public:
   }
 
   // Index and key
-
+public:
   JsonNode &operator[](size_t idx) {
     return (*std::get<JsonArr_t *>(m_value))[idx];
   }
@@ -655,10 +527,35 @@ public:
   }
 
   // Type and getter
+private:
+  char getNumType() const {
+    constexpr uint8_t numTypeOffset = static_cast<uint8_t>(JsonType::Num);
+    if (m_value.index() == numTypeOffset + 0)
+      return 'd';
+    if (m_value.index() == numTypeOffset + 1)
+      return 'i';
+    if (m_value.index() == numTypeOffset + 2)
+      return 'u';
+    return '\0';
+  }
 
-  JsonType type() const { return static_cast<JsonType>(m_value.index()); }
+public:
+  JsonType type() const {
+    constexpr JsonType types[]{
+#ifdef JSON_ENABLE_EMPTY_NODE
+        JsonType::Empty,
+#endif
+        JsonType::Null,  JsonType::Bool, JsonType::Num, JsonType::Num,
+        JsonType::Num,   JsonType::Str,  JsonType::Arr, JsonType::Obj};
+
+    return types[m_value.index()];
+  }
   std::string typeStr() const {
-    const char *types[]{"empty", "null", "bool", "num", "str", "arr", "obj"};
+    constexpr const char *types[]{
+#ifdef JSON_ENABLE_EMPTY_NODE
+        "empty",
+#endif
+        "null",  "bool", "num", "num", "num", "str", "arr", "obj"};
     return types[m_value.index()];
   }
 
@@ -694,21 +591,27 @@ public:
   }
 
   template <typename T>
-  typename std::enable_if_t<
-      (!(isJsonType<T>::value) && std::is_arithmetic_v<T>), const T>
+  typename std::enable_if_t<!isJsonValType<T>::value && std::is_arithmetic_v<T>,
+                            const T>
   get() const {
-    return static_cast<T>(std::get<JsonNum_t>(m_value));
+    switch (getNumType()) {
+    case 'd':
+      return static_cast<T>(std::get<double>(m_value));
+    case 'i':
+      return static_cast<T>(std::get<int64_t>(m_value));
+    case 'u':
+      return static_cast<T>(std::get<uint64_t>(m_value));
+    }
+    return static_cast<T>(std::get<double>(m_value));
   }
 
   template <typename T>
   typename std::enable_if_t<std::is_same_v<T, const char *>, const char *>
   get() const {
-    if (isStr())
-      return std::get<JsonStr_t *>(m_value)->c_str();
-    else
-      return nullptr;
+    return std::get<JsonStr_t *>(m_value)->c_str();
   }
 
+  // Iterators
 private:
   template <typename ArrIter, typename ObjIter> class IteratorGen {
   public:
@@ -858,6 +761,7 @@ public:
       return ConstReverseIterator(std::get<JsonObj_t *>(m_value)->crend());
   }
 
+  // serialization
 public:
   void dump(std::ostream &os, size_t indent = -1, bool ascii = true) const {
 
@@ -878,7 +782,17 @@ public:
         stateStack.pop();
         break;
       case JsonType::Num:
-        os << node->get<JsonNum_t>();
+        switch (node->getNumType()) {
+        case 'd':
+          os << node->get<double>();
+          break;
+        case 'i':
+          os << node->get<int64_t>();
+          break;
+        case 'u':
+          os << node->get<uint64_t>();
+          break;
+        }
         stateStack.pop();
         break;
       case JsonType::Str:
@@ -1038,11 +952,11 @@ private:
 
 private:
 #ifdef JSON_ENABLE_EMPTY_NODE
-  std::variant<std::monostate, JsonNull_t, bool, JsonNum_t, JsonStr_t *,
-               JsonArr_t *, JsonObj_t *>
+  std::variant<std::monostate, JsonNull_t, bool, double, int64_t, uint64_t,
+               JsonStr_t *, JsonArr_t *, JsonObj_t *>
 #else
-  std::variant<JsonNull_t, bool, JsonNum_t, JsonStr_t *, JsonArr_t *,
-               JsonObj_t *>
+  std::variant<JsonNull_t, bool, double, int64_t, uint64_t, JsonStr_t *,
+               JsonArr_t *, JsonObj_t *>
 #endif
       m_value;
 };
@@ -1543,12 +1457,75 @@ inline void JsonParser::parseNumber(DerivedInputStream &is, JsonNode *node) {
       numStr.push_back(is.get());
   }
 
-  JsonNum_t num;
-  auto result = num.fromChars(numStr, isFloatingPoint, isSigned);
+  std::from_chars_result result{};
+  union {
+    double d;
+    int64_t i;
+    uint64_t u;
+  } num{};
+
+  if (isFloatingPoint) {
+    result =
+        std::from_chars(numStr.data(), numStr.data() + numStr.size(), num.d);
+    node->m_value.emplace<double>(num.d);
+  } else if (isSigned) {
+    constexpr std::string_view maxSignedIntStr = "9223372036854775808"; // 2^63
+    size_t unsignedLen = numStr.size() - 1;
+    bool overflow = false;
+    if (unsignedLen == maxSignedIntStr.size()) {
+      for (size_t i = 0; i < maxSignedIntStr.size(); ++i) {
+        if (numStr[i + 1] > maxSignedIntStr[i]) {
+          overflow = true;
+          break;
+        } else if (numStr[i + 1] < maxSignedIntStr[i]) {
+          break;
+        }
+      }
+    } else {
+      overflow = unsignedLen > maxSignedIntStr.size();
+    }
+
+    if (overflow) {
+      result =
+          std::from_chars(numStr.data(), numStr.data() + numStr.size(), num.d);
+      node->m_value.emplace<double>(num.d);
+    } else {
+      result =
+          std::from_chars(numStr.data(), numStr.data() + numStr.size(), num.i);
+      node->m_value.emplace<int64_t>(num.i);
+    }
+
+  } else {
+    constexpr std::string_view maxUnsignedIntStr =
+        "18446744073709551615"; // 2^64 - 1
+    bool overflow = false;
+    if (numStr.size() == maxUnsignedIntStr.size()) {
+      for (size_t i = 0; i < maxUnsignedIntStr.size(); ++i) {
+        if (numStr[i] > maxUnsignedIntStr[i]) {
+          overflow = true;
+          break;
+        } else if (numStr[i] < maxUnsignedIntStr[i]) {
+          break;
+        }
+      }
+    } else {
+      overflow = numStr.size() > maxUnsignedIntStr.size();
+    }
+
+    if (overflow) {
+      result =
+          std::from_chars(numStr.data(), numStr.data() + numStr.size(), num.d);
+      node->m_value.emplace<double>(num.d);
+    } else {
+      result =
+          std::from_chars(numStr.data(), numStr.data() + numStr.size(), num.u);
+      node->m_value.emplace<uint64_t>(num.u);
+    }
+  }
+
   if (result.ec != std::errc{})
     throw std::runtime_error(
         getJsonErrorMsg(detail::JsonErrorCode::InvalidNumber));
-  node->m_value.emplace<JsonNum_t>(num);
 }
 
 #endif
