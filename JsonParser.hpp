@@ -1,7 +1,6 @@
 #ifndef JSON_PARSER_HPP_
 #define JSON_PARSER_HPP_
 
-#include <charconv>
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
@@ -1196,12 +1195,11 @@ inline void JsonParser::skipSpace(DerivedInputStream &is) {
 
 template <typename DerivedInputStream>
 inline void JsonParser::parseLiteral(DerivedInputStream &is, JsonNode *node) {
-  *node = JsonNode{};
   if (is.ch() == 'n') {
     is.next();
     if (!is.eoi() && is.get() == 'u' && !is.eoi() && is.get() == 'l' &&
         !is.eoi() && is.get() == 'l') {
-      node->ty_ = JsonNode::NullType_;
+      *node = JsonNull;
       return;
     }
   }
@@ -1209,8 +1207,7 @@ inline void JsonParser::parseLiteral(DerivedInputStream &is, JsonNode *node) {
     is.next();
     if (!is.eoi() && is.get() == 'r' && !is.eoi() && is.get() == 'u' &&
         !is.eoi() && is.get() == 'e') {
-      node->ty_ = JsonNode::BoolType_;
-      node->val_.b = true;
+      *node = true;
       return;
     }
   }
@@ -1218,8 +1215,7 @@ inline void JsonParser::parseLiteral(DerivedInputStream &is, JsonNode *node) {
     is.next();
     if (!is.eoi() && is.get() == 'a' && !is.eoi() && is.get() == 'l' &&
         !is.eoi() && is.get() == 's' && !is.eoi() && is.get() == 'e') {
-      node->ty_ = JsonNode::BoolType_;
-      node->val_.b = false;
+      *node = false;
       return;
     }
   }
@@ -1455,8 +1451,6 @@ inline void JsonParser::handleComma(DerivedInputStream &is) {
 
 template <typename DerivedInputStream>
 inline void JsonParser::parseNumber(DerivedInputStream &is, JsonNode *node) {
-  *node = JsonNode{};
-
   std::string numStr;
 
   bool isSigned = false;
@@ -1502,69 +1496,63 @@ inline void JsonParser::parseNumber(DerivedInputStream &is, JsonNode *node) {
       numStr.push_back(is.get());
   }
 
-  std::from_chars_result result{};
-  if (isFloatingPoint) {
-    node->ty_ = JsonNode::DoubleType_;
-    result = std::from_chars(numStr.data(), numStr.data() + numStr.size(),
-                             node->val_.d);
-  } else if (isSigned) {
-    constexpr std::string_view maxSignedIntStr = "9223372036854775808"; // 2^63
-    size_t unsignedLen = numStr.size() - 1;
-    bool overflow = false;
-    if (unsignedLen == maxSignedIntStr.size()) {
-      for (size_t i = 0; i < maxSignedIntStr.size(); ++i) {
-        if (numStr[i + 1] > maxSignedIntStr[i]) {
-          overflow = true;
-          break;
-        } else if (numStr[i + 1] < maxSignedIntStr[i]) {
-          break;
+  try {
+    if (isFloatingPoint) {
+      *node = std::stod(numStr);
+    } else if (isSigned) {
+      constexpr std::string_view maxSignedIntStr =
+          "9223372036854775808"; // 2^63
+      size_t unsignedLen = numStr.size() - 1;
+      bool overflow = false;
+      if (unsignedLen == maxSignedIntStr.size()) {
+        for (size_t i = 0; i < maxSignedIntStr.size(); ++i) {
+          if (numStr[i + 1] > maxSignedIntStr[i]) {
+            overflow = true;
+            break;
+          } else if (numStr[i + 1] < maxSignedIntStr[i]) {
+            break;
+          }
         }
+      } else {
+        overflow = unsignedLen > maxSignedIntStr.size();
       }
-    } else {
-      overflow = unsignedLen > maxSignedIntStr.size();
-    }
 
-    if (overflow) {
-      node->ty_ = JsonNode::DoubleType_;
-      result = std::from_chars(numStr.data(), numStr.data() + numStr.size(),
-                               node->val_.d);
-    } else {
-      node->ty_ = JsonNode::IntType_;
-      result = std::from_chars(numStr.data(), numStr.data() + numStr.size(),
-                               node->val_.i);
-    }
+      if (overflow) {
+        *node = std::stod(numStr);
+      } else {
+        *node = std::stoll(numStr);
+      }
 
-  } else {
-    constexpr std::string_view maxUnsignedIntStr =
-        "18446744073709551615"; // 2^64 - 1
-    bool overflow = false;
-    if (numStr.size() == maxUnsignedIntStr.size()) {
-      for (size_t i = 0; i < maxUnsignedIntStr.size(); ++i) {
-        if (numStr[i] > maxUnsignedIntStr[i]) {
-          overflow = true;
-          break;
-        } else if (numStr[i] < maxUnsignedIntStr[i]) {
-          break;
+    } else {
+      constexpr std::string_view maxUnsignedIntStr =
+          "18446744073709551615"; // 2^64 - 1
+      bool overflow = false;
+      if (numStr.size() == maxUnsignedIntStr.size()) {
+        for (size_t i = 0; i < maxUnsignedIntStr.size(); ++i) {
+          if (numStr[i] > maxUnsignedIntStr[i]) {
+            overflow = true;
+            break;
+          } else if (numStr[i] < maxUnsignedIntStr[i]) {
+            break;
+          }
         }
+      } else {
+        overflow = numStr.size() > maxUnsignedIntStr.size();
       }
-    } else {
-      overflow = numStr.size() > maxUnsignedIntStr.size();
-    }
 
-    if (overflow) {
-      node->ty_ = JsonNode::DoubleType_;
-      result = std::from_chars(numStr.data(), numStr.data() + numStr.size(),
-                               node->val_.d);
-    } else {
-      node->ty_ = JsonNode::UintType_;
-      result = std::from_chars(numStr.data(), numStr.data() + numStr.size(),
-                               node->val_.u);
+      if (overflow) {
+        *node = std::stod(numStr);
+      } else {
+        *node = std::stoull(numStr);
+      }
     }
-  }
-
-  if (result.ec != std::errc{})
+  } catch (const std::out_of_range &) {
     throw std::runtime_error(
         getJsonErrorMsg(detail::JsonErrorCode::InvalidNumber));
+  } catch (const std::invalid_argument &) {
+    throw std::runtime_error(
+        getJsonErrorMsg(detail::JsonErrorCode::InvalidNumber));
+  }
 }
 
 #endif
