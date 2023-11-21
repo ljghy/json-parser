@@ -480,7 +480,11 @@ public:
   }
 
   JsonNode &operator[](const std::string &key) {
-    requireType(ObjType_);
+    if (ty_ != ObjType_) {
+      clear();
+      ty_ = ObjType_;
+      val_.o = new JsonObj_t{};
+    }
     return (*val_.o)[key];
   }
   JsonNode &at(const std::string &key) {
@@ -625,7 +629,8 @@ public:
 
   // Iterators
 private:
-  template <typename ArrIter, typename ObjIter> class IteratorGen {
+  template <typename ElemType, typename ArrIter, typename ObjIter>
+  class IteratorGen {
   public:
     IteratorGen(ArrIter iter) { m_iter.template emplace<0>(iter); }
     IteratorGen(ObjIter iter) { m_iter.template emplace<1>(iter); }
@@ -636,6 +641,26 @@ private:
       else
         ++std::get<1>(m_iter);
       return *this;
+    }
+
+    IteratorGen operator++(int) {
+      IteratorGen tmp = *this;
+      ++(*this);
+      return tmp;
+    }
+
+    IteratorGen &operator--() {
+      if (m_iter.index() == 0)
+        --std::get<0>(m_iter);
+      else
+        --std::get<1>(m_iter);
+      return *this;
+    }
+
+    IteratorGen operator--(int) {
+      IteratorGen tmp = *this;
+      --(*this);
+      return tmp;
     }
 
     bool operator==(const IteratorGen &rhs) const {
@@ -686,17 +711,17 @@ private:
       return rhs != lhs;
     }
 
-    auto &operator*() const {
+    ElemType &operator*() const {
       if (m_iter.index() == 0)
         return *std::get<0>(m_iter);
       else
         return std::get<1>(m_iter)->second;
     }
-    auto *operator->() const {
+    ElemType *operator->() const {
       if (m_iter.index() == 0)
-        return *std::get<0>(m_iter);
+        return &*std::get<0>(m_iter);
       else
-        return std::get<1>(m_iter)->second;
+        return &std::get<1>(m_iter)->second;
     }
 
   private:
@@ -704,13 +729,15 @@ private:
   };
 
 public:
-  using Iterator = IteratorGen<JsonArr_t::iterator, JsonObj_t::iterator>;
-  using ConstIterator =
-      IteratorGen<JsonArr_t::const_iterator, JsonObj_t::const_iterator>;
-  using ReverseIterator =
-      IteratorGen<JsonArr_t::reverse_iterator, JsonObj_t::reverse_iterator>;
-  using ConstReverseIterator = IteratorGen<JsonArr_t::const_reverse_iterator,
-                                           JsonObj_t::const_reverse_iterator>;
+  using Iterator =
+      IteratorGen<JsonNode, JsonArr_t::iterator, JsonObj_t::iterator>;
+  using ConstIterator = IteratorGen<const JsonNode, JsonArr_t::const_iterator,
+                                    JsonObj_t::const_iterator>;
+  using ReverseIterator = IteratorGen<JsonNode, JsonArr_t::reverse_iterator,
+                                      JsonObj_t::reverse_iterator>;
+  using ConstReverseIterator =
+      IteratorGen<const JsonNode, JsonArr_t::const_reverse_iterator,
+                  JsonObj_t::const_reverse_iterator>;
 
   Iterator begin() {
     if (ty_ == ArrType_)
