@@ -589,12 +589,14 @@ public:
     return *val_.s;
   }
   template <typename T>
-  typename std::enable_if_t<std::is_same_v<T, JsonArr_t>, const T &> get() {
+  typename std::enable_if_t<std::is_same_v<T, JsonArr_t>, const T &>
+  get() const {
     requireType(ArrType_);
     return *val_.a;
   }
   template <typename T>
-  typename std::enable_if_t<std::is_same_v<T, JsonObj_t>, const T &> get() {
+  typename std::enable_if_t<std::is_same_v<T, JsonObj_t>, const T &>
+  get() const {
     requireType(ObjType_);
     return *val_.o;
   }
