@@ -7,7 +7,6 @@
 #include <initializer_list>
 #include <iomanip>
 #include <istream>
-#include <limits>
 #include <map>
 #include <sstream>
 #include <stack>
@@ -57,12 +56,6 @@ enum class JsonType : uint8_t {
 
 namespace detail {
 
-#ifdef JSON_ENABLE_EMPTY_NODE
-inline constexpr auto JsonEmptyValue = std::monostate{};
-#else
-inline constexpr auto JsonEmptyValue = JsonNull;
-#endif
-
 enum class JsonErrorCode : uint8_t {
   InvalidJson = 0,
   UnexpectedEndOfInput,
@@ -74,6 +67,8 @@ enum class JsonErrorCode : uint8_t {
   InvalidEscapeSequence,
   InvalidKeyValuePair,
   InvalidArrayOrObject,
+
+  InvalidJsonAccess,
 };
 
 inline const char *JsonErrorMsg[]{
@@ -82,12 +77,12 @@ inline const char *JsonErrorMsg[]{
     "invalid string",         "invalid character",
     "invalid unicode",        "invalid escape sequence",
     "invalid key-value pair", "invalid array or object",
+    "invalid json access",
 };
 
 inline const char *getJsonErrorMsg(JsonErrorCode code) {
   return JsonErrorMsg[static_cast<uint8_t>(code)];
 }
-
 }; // namespace detail
 
 class JsonNode {
@@ -103,9 +98,9 @@ private:
 
     TraverseState(JsonNode *n) : node(n) {
       if (n->isArr())
-        arrIt = std::get<JsonArr_t *>(n->m_value)->begin();
+        arrIt = n->val_.a->begin();
       else if (n->isObj())
-        objIt = std::get<JsonObj_t *>(n->m_value)->begin();
+        objIt = n->val_.o->begin();
     }
   };
 
@@ -118,30 +113,13 @@ private:
 
     ConstTraverseState(const JsonNode *n) : node(n) {
       if (n->isArr())
-        arrIt = std::get<JsonArr_t *>(n->m_value)->cbegin();
+        arrIt = n->val_.a->cbegin();
       else if (n->isObj())
-        objIt = std::get<JsonObj_t *>(n->m_value)->cbegin();
+        objIt = n->val_.o->cbegin();
     }
   };
 
-  template <typename T> struct isJsonType {
-    static constexpr bool value =
-        std::is_same_v<T, JsonNull_t> || std::is_same_v<T, bool> ||
-        std::is_same_v<T, JsonStr_t> || std::is_same_v<T, JsonArr_t> ||
-        std::is_same_v<T, JsonObj_t>;
-  };
-
-  template <typename T> struct isJsonValType {
-    static constexpr bool value =
-        std::is_same_v<T, JsonNull_t> || std::is_same_v<T, bool>;
-  };
-
-  template <typename T> struct isJsonPtrType {
-    static constexpr bool value = std::is_same_v<T, JsonStr_t> ||
-                                  std::is_same_v<T, JsonArr_t> ||
-                                  std::is_same_v<T, JsonObj_t>;
-  };
-
+private:
   template <typename T> struct isSignedIntegral {
     static constexpr bool value =
         std::is_integral_v<T> && std::is_signed_v<T> &&
@@ -158,46 +136,62 @@ private:
 public:
   JsonNode() = default;
 
-  template <typename T,
-            typename std::enable_if_t<isJsonValType<T>::value, int> = 0>
-  JsonNode(const T &value) : m_value(value) {}
+  JsonNode(JsonNull_t) : ty_(NullType_) {}
 
-  template <typename T,
-            typename std::enable_if_t<isJsonValType<T>::value, int> = 0>
-  JsonNode(T &&value) : m_value(value) {}
+  JsonNode(bool b) : ty_(BoolType_) { val_.b = b; }
 
-  JsonNode(const JsonArr_t &arr) : m_value(new JsonArr_t(arr)) {}
-  JsonNode(JsonArr_t &&arr) : m_value(new JsonArr_t(std::move(arr))) {}
+  JsonNode(const JsonStr_t &str) : ty_(StrType_) {
+    val_.s = new JsonStr_t(str);
+  }
 
-  JsonNode(const JsonObj_t &obj) : m_value(new JsonObj_t(obj)) {}
-  JsonNode(JsonObj_t &&obj) : m_value(new JsonObj_t(std::move(obj))) {}
+  JsonNode(const JsonArr_t &arr) : ty_(ArrType_) {
+    val_.a = new JsonArr_t(arr);
+  }
+  JsonNode(JsonArr_t &&arr) : ty_(ArrType_) {
+    val_.a = new JsonArr_t(std::move(arr));
+  }
+
+  JsonNode(const JsonObj_t &obj) : ty_(ObjType_) {
+    val_.o = new JsonObj_t(obj);
+  }
+  JsonNode(JsonObj_t &&obj) : ty_(ObjType_) {
+    val_.o = new JsonObj_t(std::move(obj));
+  }
 
   template <typename T,
             typename std::enable_if_t<std::is_floating_point_v<T>, int> = 0>
-  JsonNode(T num) : m_value(static_cast<double>(num)) {}
+  JsonNode(T num) : ty_(DoubleType_) {
+    val_.d = static_cast<double>(num);
+  }
 
   template <typename T,
             typename std::enable_if_t<isSignedIntegral<T>::value, int> = 0>
-  JsonNode(T num) : m_value(static_cast<int64_t>(num)) {}
+  JsonNode(T num) : ty_(IntType_) {
+    val_.i = static_cast<int64_t>(num);
+  }
 
   template <typename T,
             typename std::enable_if_t<isUnsignedIntegral<T>::value, int> = 0>
-  JsonNode(T num) : m_value(static_cast<uint64_t>(num)) {}
+  JsonNode(T num) : ty_(UintType_) {
+    val_.u = static_cast<uint64_t>(num);
+  }
 
-  JsonNode(std::nullptr_t) : m_value(JsonNull) {}
+  JsonNode(std::nullptr_t) : ty_(NullType_) {}
 
-  JsonNode(char c) : m_value(new JsonStr_t(1, c)) {}
+  JsonNode(char c) : ty_(StrType_) { val_.s = new JsonStr_t(1, c); }
 
-  JsonNode(const char *str) : m_value(new JsonStr_t(str)) {}
+  JsonNode(const char *str) : ty_(StrType_) { val_.s = new JsonStr_t(str); }
 
-  JsonNode(const std::initializer_list<JsonNode> &arr)
-      : m_value(new JsonArr_t(arr)) {}
+  JsonNode(const std::initializer_list<JsonNode> &arr) : ty_(ArrType_) {
+    val_.a = new JsonArr_t(arr);
+  }
   JsonNode(
       const std::initializer_list<std::pair<const JsonKeyLiteral_t, JsonNode>>
-          &obj) {
-    auto o = m_value.emplace<JsonObj_t *>(new JsonObj_t{});
+          &obj)
+      : ty_(ObjType_) {
+    val_.o = new JsonObj_t{};
     for (const auto &p : obj) {
-      o->emplace(p.first.key, p.second);
+      val_.o->emplace(p.first.key, p.second);
     }
   }
 
@@ -209,72 +203,63 @@ public:
     while (!stateStack.empty()) {
       auto otherNode = stateStack.top().node;
       auto node = nodeStack.top();
-      switch (otherNode->type()) {
-      case JsonType::Arr: {
-        auto &otherArr = *std::get<JsonArr_t *>(otherNode->m_value);
+      node->ty_ = otherNode->ty_;
+      switch (otherNode->ty_) {
+      case ArrType_: {
+        auto &otherArr = *otherNode->val_.a;
         auto &it = stateStack.top().arrIt;
         if (it == otherArr.cbegin()) {
-          node->m_value.emplace<JsonArr_t *>(new JsonArr_t{})
-              ->reserve(otherArr.size());
+          (node->val_.a = new JsonArr_t{})->reserve(otherArr.size());
         }
         if (it != otherArr.cend()) {
           const auto otherChild = &(*it);
           ++it;
           stateStack.emplace(otherChild);
-          nodeStack.emplace(
-              &(std::get<JsonArr_t *>(node->m_value)->emplace_back()));
+          nodeStack.emplace(&(node->val_.a->emplace_back()));
         } else {
           stateStack.pop();
           nodeStack.pop();
         }
       } break;
-      case JsonType::Obj: {
-        auto &otherObj = *std::get<JsonObj_t *>(otherNode->m_value);
+      case ObjType_: {
+        auto &otherObj = *otherNode->val_.o;
         auto &it = stateStack.top().objIt;
         if (it == otherObj.cbegin()) {
-          node->m_value.emplace<JsonObj_t *>(new JsonObj_t{});
+          node->val_.o = new JsonObj_t{};
         }
         if (it != otherObj.cend()) {
           const auto otherChild = &(it->second);
           stateStack.emplace(otherChild);
-          nodeStack.emplace(&(std::get<JsonObj_t *>(node->m_value)
-                                  ->emplace(it->first, JsonNode{})
-                                  .first->second));
+          nodeStack.emplace(
+              &(node->val_.o->emplace(it->first, JsonNode{}).first->second));
           ++it;
         } else {
           stateStack.pop();
           nodeStack.pop();
         }
       } break;
-      case JsonType::Str:
-        nodeStack.top()->m_value.emplace<JsonStr_t *>(
-            new JsonStr_t(*std::get<JsonStr_t *>(otherNode->m_value)));
+      case StrType_:
+        nodeStack.top()->val_.s = new JsonStr_t(*otherNode->val_.s);
+        stateStack.pop();
+        nodeStack.pop();
+        break;
+      case DoubleType_:
+      case IntType_:
+      case UintType_:
+      case BoolType_:
+        nodeStack.top()->val_ = otherNode->val_;
         stateStack.pop();
         nodeStack.pop();
         break;
       default:
-        nodeStack.top()->m_value = otherNode->m_value;
         stateStack.pop();
         nodeStack.pop();
       }
     }
   }
 
-  JsonNode(JsonNode &&other) noexcept {
-    switch (other.type()) {
-    case JsonType::Arr:
-      m_value = std::get<JsonArr_t *>(other.m_value);
-      break;
-    case JsonType::Obj:
-      m_value = std::get<JsonObj_t *>(other.m_value);
-      break;
-    case JsonType::Str:
-      m_value = std::get<JsonStr_t *>(other.m_value);
-      break;
-    default:
-      m_value = other.m_value;
-    }
-    other.m_value = detail::JsonEmptyValue;
+  JsonNode(JsonNode &&other) noexcept : ty_(other.ty_), val_(other.val_) {
+    other.ty_ = {};
   }
 
   // Destructor
@@ -284,14 +269,13 @@ public:
     if (isEmpty())
       return;
 #endif
-
     std::stack<TraverseState> stateStack;
     stateStack.emplace(this);
     while (!stateStack.empty()) {
       auto node = stateStack.top().node;
-      switch (node->type()) {
-      case JsonType::Arr: {
-        auto &arr = std::get<JsonArr_t *>(node->m_value);
+      switch (node->ty_) {
+      case ArrType_: {
+        auto &arr = node->val_.a;
         auto &it = stateStack.top().arrIt;
         if (it != arr->cend()) {
           const auto child = &(*it);
@@ -299,12 +283,12 @@ public:
           stateStack.emplace(child);
         } else {
           delete arr;
-          node->m_value = detail::JsonEmptyValue;
+          node->ty_ = {};
           stateStack.pop();
         }
       } break;
-      case JsonType::Obj: {
-        auto &obj = std::get<JsonObj_t *>(node->m_value);
+      case ObjType_: {
+        auto &obj = node->val_.o;
         auto &it = stateStack.top().objIt;
         if (it != obj->cend()) {
           const auto child = &(it->second);
@@ -312,37 +296,37 @@ public:
           stateStack.emplace(child);
         } else {
           delete obj;
-          node->m_value = detail::JsonEmptyValue;
+          node->ty_ = {};
           stateStack.pop();
         }
       } break;
-      case JsonType::Str:
-        delete std::get<JsonStr_t *>(node->m_value);
-        node->m_value = detail::JsonEmptyValue;
+      case StrType_:
+        delete node->val_.s;
+        node->ty_ = {};
         stateStack.pop();
         break;
       default:
-        node->m_value = detail::JsonEmptyValue;
+        node->ty_ = {};
         stateStack.pop();
       }
     }
   }
 
   void clear() {
-    switch (type()) {
-    case JsonType::Arr:
-      delete std::get<JsonArr_t *>(m_value);
+    switch (ty_) {
+    case ArrType_:
+      delete val_.a;
       break;
-    case JsonType::Obj:
-      delete std::get<JsonObj_t *>(m_value);
+    case ObjType_:
+      delete val_.o;
       break;
-    case JsonType::Str:
-      delete std::get<JsonStr_t *>(m_value);
+    case StrType_:
+      delete val_.s;
       break;
     default:
       break;
     }
-    m_value = detail::JsonEmptyValue;
+    ty_ = {};
   }
 
   // Assignment operators
@@ -351,75 +335,67 @@ public:
     if (this == &other)
       return *this;
 
-    switch (other.type()) {
-    case JsonType::Arr: {
-      auto otherArr = *std::get<JsonArr_t *>(other.m_value);
-      if (isArr())
-        *std::get<JsonArr_t *>(m_value) = std::move(otherArr);
+    switch (other.ty_) {
+    case ArrType_: {
+      auto otherArr = *other.val_.a;
+      if (ty_ == ArrType_)
+        val_.a->swap(otherArr);
       else {
         clear();
-        m_value = new JsonArr_t(std::move(otherArr));
+        val_.a = new JsonArr_t(std::move(otherArr));
       }
     } break;
-    case JsonType::Obj: {
-      auto otherObj = *std::get<JsonObj_t *>(other.m_value);
-      if (isObj())
-        *std::get<JsonObj_t *>(m_value) = std::move(otherObj);
+    case ObjType_: {
+      auto otherObj = *other.val_.o;
+      if (ty_ == ObjType_)
+        *val_.o = std::move(otherObj);
       else {
         clear();
-        m_value = new JsonObj_t(std::move(otherObj));
+        val_.o = new JsonObj_t(std::move(otherObj));
       }
     } break;
-    case JsonType::Str: {
-      auto otherStr = *std::get<JsonStr_t *>(other.m_value);
-      if (isStr())
-        *std::get<JsonStr_t *>(m_value) = std::move(otherStr);
+    case StrType_: {
+      auto otherStr = *other.val_.s;
+      if (ty_ == StrType_)
+        *val_.s = std::move(otherStr);
       else {
         clear();
-        m_value = new JsonStr_t(std::move(otherStr));
+        val_.s = new JsonStr_t(std::move(otherStr));
       }
     } break;
+    case DoubleType_:
+    case IntType_:
+    case UintType_:
+    case BoolType_:
+      val_ = other.val_;
+      break;
     default:
-      clear();
-      m_value = other.m_value;
+      break;
     }
+    ty_ = other.ty_;
     return *this;
   }
 
   JsonNode &operator=(JsonNode &&other) noexcept {
     if (this == &other)
       return *this;
-
-    switch (other.type()) {
-    case JsonType::Arr:
-      m_value = std::get<JsonArr_t *>(other.m_value);
-      break;
-    case JsonType::Obj:
-      m_value = std::get<JsonObj_t *>(other.m_value);
-      break;
-    case JsonType::Str:
-      m_value = std::get<JsonStr_t *>(other.m_value);
-      break;
-    default:
-      m_value = other.m_value;
-    }
-    other.m_value = detail::JsonEmptyValue;
+    clear();
+    ty_ = other.ty_;
+    val_ = other.val_;
+    other.ty_ = {};
     return *this;
   }
 
-  template <typename T>
-  typename std::enable_if_t<isJsonValType<T>::value, JsonNode &>
-  operator=(const T &value) {
+  JsonNode &operator=(JsonNull_t) {
     clear();
-    m_value = value;
+    ty_ = NullType_;
     return *this;
   }
 
-  template <typename T>
-  typename std::enable_if_t<isJsonValType<T>::value, JsonNode &>
-  operator=(T &&value) {
+  JsonNode &operator=(bool b) {
     clear();
-    m_value = std::move(value);
+    ty_ = BoolType_;
+    val_.b = b;
     return *this;
   }
 
@@ -427,7 +403,8 @@ public:
   typename std::enable_if_t<std::is_floating_point_v<T>, JsonNode &>
   operator=(T value) {
     clear();
-    m_value = static_cast<double>(value);
+    ty_ = DoubleType_;
+    val_.d = static_cast<double>(value);
     return *this;
   }
 
@@ -435,7 +412,8 @@ public:
   typename std::enable_if_t<isSignedIntegral<T>::value, JsonNode &>
   operator=(T value) {
     clear();
-    m_value = static_cast<int64_t>(value);
+    ty_ = IntType_;
+    val_.i = static_cast<int64_t>(value);
     return *this;
   }
 
@@ -443,84 +421,104 @@ public:
   typename std::enable_if_t<isUnsignedIntegral<T>::value, JsonNode &>
   operator=(T value) {
     clear();
-    m_value = static_cast<uint64_t>(value);
+    ty_ = UintType_;
+    val_.u = static_cast<uint64_t>(value);
     return *this;
   }
 
   JsonNode &operator=(std::nullptr_t) {
     clear();
-    m_value = JsonNull;
+    ty_ = NullType_;
     return *this;
   }
 
   JsonNode &operator=(char c) {
-    if (isStr())
-      *std::get<JsonStr_t *>(m_value) = c;
+    if (ty_ == StrType_)
+      *val_.s = c;
     else {
       clear();
-      m_value = new JsonStr_t(1, c);
+      ty_ = StrType_;
+      val_.s = new JsonStr_t(1, c);
     }
     return *this;
   }
 
   JsonNode &operator=(const char *str) {
-    if (isStr())
-      *std::get<JsonStr_t *>(m_value) = str;
+    if (ty_ == StrType_)
+      *val_.s = str;
     else {
       clear();
-      m_value = new JsonStr_t(str);
+      ty_ = StrType_;
+      val_.s = new JsonStr_t(str);
     }
     return *this;
   }
 
   // Index and key
+private:
+  void requireType(size_t ty) const {
+    if (ty_ != ty)
+      throw std::runtime_error(
+          getJsonErrorMsg(detail::JsonErrorCode::InvalidJsonAccess));
+  }
+
 public:
   JsonNode &operator[](size_t idx) {
-    return (*std::get<JsonArr_t *>(m_value))[idx];
+    requireType(ArrType_);
+    return (*val_.a)[idx];
   }
-  JsonNode &at(size_t idx) { return std::get<JsonArr_t *>(m_value)->at(idx); }
+  JsonNode &at(size_t idx) {
+    requireType(ArrType_);
+    return val_.a->at(idx);
+  }
   const JsonNode &operator[](size_t idx) const {
-    return (*std::get<JsonArr_t *>(m_value))[idx];
+    requireType(ArrType_);
+    return (*val_.a)[idx];
   }
   const JsonNode &at(size_t idx) const {
-    return std::get<JsonArr_t *>(m_value)->at(idx);
+    requireType(ArrType_);
+    return val_.a->at(idx);
   }
 
   JsonNode &operator[](const std::string &key) {
-    return (*std::get<JsonObj_t *>(m_value))[key];
+    requireType(ObjType_);
+    return (*val_.o)[key];
   }
   JsonNode &at(const std::string &key) {
-    return std::get<JsonObj_t *>(m_value)->at(key);
+    requireType(ObjType_);
+    return val_.o->at(key);
   }
   const JsonNode &operator[](const std::string &key) const {
-    return std::get<JsonObj_t *>(m_value)->at(key);
+    requireType(ObjType_);
+    return val_.o->at(key);
   }
   const JsonNode &at(const std::string &key) const {
-    return std::get<JsonObj_t *>(m_value)->at(key);
+    requireType(ObjType_);
+    return val_.o->at(key);
   }
 
   bool hasKey(const JsonStr_t &key) const {
-    if (!isObj())
-      return false;
-    const auto &obj = *std::get<JsonObj_t *>(m_value);
-    return obj.find(key) != obj.end();
+    requireType(ObjType_);
+    return val_.o->find(key) != val_.o->end();
   }
 
   JsonObj_t::iterator find(const JsonStr_t &key) {
-    return std::get<JsonObj_t *>(m_value)->find(key);
+    requireType(ObjType_);
+    return val_.o->find(key);
   }
 
   JsonObj_t::const_iterator find(const JsonStr_t &key) const {
-    return std::get<JsonObj_t *>(m_value)->find(key);
+    requireType(ObjType_);
+    return val_.o->find(key);
   }
 
   size_t size() const {
-    if (isStr()) {
-      return std::get<JsonStr_t *>(m_value)->size();
-    } else if (isArr()) {
-      return std::get<JsonArr_t *>(m_value)->size();
-    } else if (isObj()) {
-      return std::get<JsonObj_t *>(m_value)->size();
+    if (ty_ == StrType_) {
+      return val_.s->size();
+    } else if (ty_ == ArrType_) {
+      return val_.a->size();
+    } else if (ty_ == ObjType_) {
+      return val_.o->size();
     } else {
       return 0;
     }
@@ -528,17 +526,6 @@ public:
 
   // Type and getter
 private:
-  char getNumType() const {
-    constexpr uint8_t numTypeOffset = static_cast<uint8_t>(JsonType::Num);
-    if (m_value.index() == numTypeOffset + 0)
-      return 'd';
-    if (m_value.index() == numTypeOffset + 1)
-      return 'i';
-    if (m_value.index() == numTypeOffset + 2)
-      return 'u';
-    return '\0';
-  }
-
 public:
   JsonType type() const {
     constexpr JsonType types[]{
@@ -548,7 +535,7 @@ public:
         JsonType::Null,  JsonType::Bool, JsonType::Num, JsonType::Num,
         JsonType::Num,   JsonType::Str,  JsonType::Arr, JsonType::Obj};
 
-    return types[m_value.index()];
+    return types[ty_];
   }
   std::string typeStr() const {
     constexpr const char *types[]{
@@ -556,7 +543,7 @@ public:
         "empty",
 #endif
         "null",  "bool", "num", "num", "num", "str", "arr", "obj"};
-    return types[m_value.index()];
+    return types[ty_];
   }
 
 #ifdef JSON_ENABLE_EMPTY_NODE
@@ -571,44 +558,68 @@ public:
   bool isObj() const { return type() == JsonType::Obj; }
 
   template <typename T>
-  typename std::enable_if_t<isJsonValType<T>::value, T &> get() {
-    return std::get<T>(m_value);
+  typename std::enable_if_t<std::is_same_v<T, bool>, T &> get() {
+    requireType(BoolType_);
+    return val_.b;
+  }
+  template <typename T>
+  typename std::enable_if_t<std::is_same_v<T, JsonStr_t>, T &> get() {
+    requireType(StrType_);
+    return *val_.s;
+  }
+  template <typename T>
+  typename std::enable_if_t<std::is_same_v<T, JsonArr_t>, T &> get() {
+    requireType(ArrType_);
+    return *val_.a;
+  }
+  template <typename T>
+  typename std::enable_if_t<std::is_same_v<T, JsonObj_t>, T &> get() {
+    requireType(ObjType_);
+    return *val_.o;
   }
 
   template <typename T>
-  typename std::enable_if_t<isJsonPtrType<T>::value, T &> get() {
-    return *std::get<T *>(m_value);
+  typename std::enable_if_t<std::is_same_v<T, bool>, const T> get() const {
+    requireType(BoolType_);
+    return val_.b;
   }
-
   template <typename T>
-  typename std::enable_if_t<isJsonValType<T>::value, const T> get() const {
-    return std::get<T>(m_value);
-  }
-
-  template <typename T>
-  typename std::enable_if_t<isJsonPtrType<T>::value, const T &> get() const {
-    return *std::get<T *>(m_value);
-  }
-
-  template <typename T>
-  typename std::enable_if_t<!isJsonValType<T>::value && std::is_arithmetic_v<T>,
-                            const T>
+  typename std::enable_if_t<std::is_same_v<T, JsonStr_t>, const T &>
   get() const {
-    switch (getNumType()) {
-    case 'd':
-      return static_cast<T>(std::get<double>(m_value));
-    case 'i':
-      return static_cast<T>(std::get<int64_t>(m_value));
-    case 'u':
-      return static_cast<T>(std::get<uint64_t>(m_value));
+    requireType(StrType_);
+    return *val_.s;
+  }
+  template <typename T>
+  typename std::enable_if_t<std::is_same_v<T, JsonArr_t>, const T &> get() {
+    requireType(ArrType_);
+    return *val_.a;
+  }
+  template <typename T>
+  typename std::enable_if_t<std::is_same_v<T, JsonObj_t>, const T &> get() {
+    requireType(ObjType_);
+    return *val_.o;
+  }
+
+  template <typename T>
+  typename std::enable_if_t<std::is_arithmetic_v<T>, const T> get() const {
+    switch (ty_) {
+    case DoubleType_:
+      return static_cast<T>(val_.d);
+    case IntType_:
+      return static_cast<T>(val_.i);
+    case UintType_:
+      return static_cast<T>(val_.u);
+    default:
+      throw std::runtime_error(
+          getJsonErrorMsg(detail::JsonErrorCode::InvalidJsonAccess));
     }
-    return static_cast<T>(std::get<double>(m_value));
   }
 
   template <typename T>
   typename std::enable_if_t<std::is_same_v<T, const char *>, const char *>
   get() const {
-    return std::get<JsonStr_t *>(m_value)->c_str();
+    requireType(StrType_);
+    return val_.s->c_str();
   }
 
   // Iterators
@@ -701,65 +712,81 @@ public:
                                            JsonObj_t::const_reverse_iterator>;
 
   Iterator begin() {
-    if (isArr()) {
-      return Iterator(std::get<JsonArr_t *>(m_value)->begin());
-    } else
-      return Iterator(std::get<JsonObj_t *>(m_value)->begin());
+    if (ty_ == ArrType_)
+      return val_.a->begin();
+    else if (ty_ == ObjType_)
+      return val_.o->begin();
+    else
+      throw std::runtime_error(
+          getJsonErrorMsg(detail::JsonErrorCode::InvalidJsonAccess));
   }
   Iterator end() {
-    if (isArr()) {
-      return Iterator(std::get<JsonArr_t *>(m_value)->end());
-    } else
-      return Iterator(std::get<JsonObj_t *>(m_value)->end());
+    if (ty_ == ArrType_)
+      return val_.a->end();
+    else if (ty_ == ObjType_)
+      return val_.o->end();
+    else
+      throw std::runtime_error(
+          getJsonErrorMsg(detail::JsonErrorCode::InvalidJsonAccess));
   }
   ConstIterator begin() const {
-    if (isArr()) {
-      return ConstIterator(std::get<JsonArr_t *>(m_value)->begin());
-    } else
-      return ConstIterator(std::get<JsonObj_t *>(m_value)->begin());
+    if (ty_ == ArrType_)
+      return val_.a->cbegin();
+    else if (ty_ == ObjType_)
+      return val_.o->cbegin();
+    else
+      throw std::runtime_error(
+          getJsonErrorMsg(detail::JsonErrorCode::InvalidJsonAccess));
   }
   ConstIterator end() const {
-    if (isArr()) {
-      return ConstIterator(std::get<JsonArr_t *>(m_value)->end());
-    } else
-      return ConstIterator(std::get<JsonObj_t *>(m_value)->end());
+    if (ty_ == ArrType_)
+      return val_.a->cend();
+    else if (ty_ == ObjType_)
+      return val_.o->cend();
+    else
+      throw std::runtime_error(
+          getJsonErrorMsg(detail::JsonErrorCode::InvalidJsonAccess));
   }
-  ConstIterator cbegin() const {
-    if (isArr()) {
-      return ConstIterator(std::get<JsonArr_t *>(m_value)->cbegin());
-    } else
-      return ConstIterator(std::get<JsonObj_t *>(m_value)->cbegin());
-  }
-  ConstIterator cend() const {
-    if (isArr()) {
-      return ConstIterator(std::get<JsonArr_t *>(m_value)->cend());
-    } else
-      return ConstIterator(std::get<JsonObj_t *>(m_value)->cend());
-  }
+  ConstIterator cbegin() const { return begin(); }
+  ConstIterator cend() const { return end(); }
   ReverseIterator rbegin() {
-    if (isArr()) {
-      return ReverseIterator(std::get<JsonArr_t *>(m_value)->rbegin());
-    } else
-      return ReverseIterator(std::get<JsonObj_t *>(m_value)->rbegin());
+    if (ty_ == ArrType_)
+      return val_.a->rbegin();
+    else if (ty_ == ObjType_)
+      return val_.o->rbegin();
+    else
+      throw std::runtime_error(
+          getJsonErrorMsg(detail::JsonErrorCode::InvalidJsonAccess));
   }
   ReverseIterator rend() {
-    if (isArr()) {
-      return ReverseIterator(std::get<JsonArr_t *>(m_value)->rend());
-    } else
-      return ReverseIterator(std::get<JsonObj_t *>(m_value)->rend());
+    if (ty_ == ArrType_)
+      return val_.a->rend();
+    else if (ty_ == ObjType_)
+      return val_.o->rend();
+    else
+      throw std::runtime_error(
+          getJsonErrorMsg(detail::JsonErrorCode::InvalidJsonAccess));
   }
   ConstReverseIterator rbegin() const {
-    if (isArr()) {
-      return ConstReverseIterator(std::get<JsonArr_t *>(m_value)->crbegin());
-    } else
-      return ConstReverseIterator(std::get<JsonObj_t *>(m_value)->crbegin());
+    if (ty_ == ArrType_)
+      return val_.a->crbegin();
+    else if (ty_ == ObjType_)
+      return val_.o->crbegin();
+    else
+      throw std::runtime_error(
+          getJsonErrorMsg(detail::JsonErrorCode::InvalidJsonAccess));
   }
   ConstReverseIterator rend() const {
-    if (isArr()) {
-      return ConstReverseIterator(std::get<JsonArr_t *>(m_value)->crend());
-    } else
-      return ConstReverseIterator(std::get<JsonObj_t *>(m_value)->crend());
+    if (ty_ == ArrType_)
+      return val_.a->crend();
+    else if (ty_ == ObjType_)
+      return val_.o->crend();
+    else
+      throw std::runtime_error(
+          getJsonErrorMsg(detail::JsonErrorCode::InvalidJsonAccess));
   }
+  ConstReverseIterator crbegin() const { return rbegin(); }
+  ConstReverseIterator crend() const { return rend(); }
 
   // serialization
 public:
@@ -772,36 +799,33 @@ public:
 
     while (!stateStack.empty()) {
       auto node = stateStack.top().node;
-      switch (node->type()) {
-      case JsonType::Null:
+      switch (node->ty_) {
+      case NullType_:
         os << "null";
         stateStack.pop();
         break;
-      case JsonType::Bool:
-        os << (node->get<bool>() ? "true" : "false");
+      case BoolType_:
+        os << (node->val_.b ? "true" : "false");
         stateStack.pop();
         break;
-      case JsonType::Num:
-        switch (node->getNumType()) {
-        case 'd':
-          os << node->get<double>();
-          break;
-        case 'i':
-          os << node->get<int64_t>();
-          break;
-        case 'u':
-          os << node->get<uint64_t>();
-          break;
-        }
+      case DoubleType_:
+        os << node->val_.d;
         stateStack.pop();
         break;
-      case JsonType::Str:
-        os << "\"" << toJsonString(*std::get<JsonStr_t *>(node->m_value), ascii)
-           << "\"";
+      case IntType_:
+        os << node->val_.i;
         stateStack.pop();
         break;
-      case JsonType::Arr: {
-        const auto &arr = *std::get<JsonArr_t *>(node->m_value);
+      case UintType_:
+        os << node->val_.u;
+        stateStack.pop();
+        break;
+      case StrType_:
+        os << "\"" << toJsonString(*(node->val_.s), ascii) << "\"";
+        stateStack.pop();
+        break;
+      case ArrType_: {
+        const auto &arr = *node->val_.a;
         if (arr.empty()) {
           os << "[]";
           stateStack.pop();
@@ -832,8 +856,8 @@ public:
           stateStack.pop();
         }
       } break;
-      case JsonType::Obj: {
-        const auto &obj = *std::get<JsonObj_t *>(node->m_value);
+      case ObjType_: {
+        const auto &obj = *node->val_.o;
         if (obj.empty()) {
           os << "{}";
           stateStack.pop();
@@ -951,14 +975,31 @@ private:
   }
 
 private:
+  enum JsonInternalTypeId : size_t {
 #ifdef JSON_ENABLE_EMPTY_NODE
-  std::variant<std::monostate, JsonNull_t, bool, double, int64_t, uint64_t,
-               JsonStr_t *, JsonArr_t *, JsonObj_t *>
+    EmptyType_ = 0,
+    NullType_,
 #else
-  std::variant<JsonNull_t, bool, double, int64_t, uint64_t, JsonStr_t *,
-               JsonArr_t *, JsonObj_t *>
+    NullType_ = 0,
 #endif
-      m_value;
+    BoolType_,
+    DoubleType_,
+    IntType_,
+    UintType_,
+    StrType_,
+    ArrType_,
+    ObjType_,
+  } ty_ = {};
+
+  union {
+    bool b;
+    double d;
+    int64_t i;
+    uint64_t u;
+    JsonStr_t *s;
+    JsonArr_t *a;
+    JsonObj_t *o;
+  } val_;
 };
 
 class JsonParser {
@@ -1087,7 +1128,7 @@ JsonParser::parse(DerivedInputStream &is) {
       break;
     case '"':
       is.next();
-      node->m_value.emplace<JsonStr_t *>(new JsonStr_t(parseString(is)));
+      *node = parseString(is);
       popStack();
       break;
     case '[':
@@ -1155,11 +1196,12 @@ inline void JsonParser::skipSpace(DerivedInputStream &is) {
 
 template <typename DerivedInputStream>
 inline void JsonParser::parseLiteral(DerivedInputStream &is, JsonNode *node) {
+  *node = JsonNode{};
   if (is.ch() == 'n') {
     is.next();
     if (!is.eoi() && is.get() == 'u' && !is.eoi() && is.get() == 'l' &&
         !is.eoi() && is.get() == 'l') {
-      node->m_value.emplace<JsonNull_t>(JsonNull);
+      node->ty_ = JsonNode::NullType_;
       return;
     }
   }
@@ -1167,7 +1209,8 @@ inline void JsonParser::parseLiteral(DerivedInputStream &is, JsonNode *node) {
     is.next();
     if (!is.eoi() && is.get() == 'r' && !is.eoi() && is.get() == 'u' &&
         !is.eoi() && is.get() == 'e') {
-      node->m_value.emplace<bool>(true);
+      node->ty_ = JsonNode::BoolType_;
+      node->val_.b = true;
       return;
     }
   }
@@ -1175,7 +1218,8 @@ inline void JsonParser::parseLiteral(DerivedInputStream &is, JsonNode *node) {
     is.next();
     if (!is.eoi() && is.get() == 'a' && !is.eoi() && is.get() == 'l' &&
         !is.eoi() && is.get() == 's' && !is.eoi() && is.get() == 'e') {
-      node->m_value.emplace<bool>(false);
+      node->ty_ = JsonNode::BoolType_;
+      node->val_.b = false;
       return;
     }
   }
@@ -1357,12 +1401,12 @@ inline void JsonParser::beginArray(DerivedInputStream &is) {
         getJsonErrorMsg(detail::JsonErrorCode::UnexpectedEndOfInput));
 
   auto *node = m_nodeStack.top();
-  node->m_value.emplace<JsonArr_t *>(new JsonArr_t{});
+  *node = JsonArr_t{};
   if (is.ch() == ']') {
     is.next();
     popStack();
   } else {
-    m_nodeStack.push(&(std::get<JsonArr_t *>(node->m_value)->emplace_back()));
+    m_nodeStack.push(&(node->val_.a->emplace_back()));
   }
 }
 
@@ -1374,7 +1418,7 @@ inline void JsonParser::beginObject(DerivedInputStream &is) {
         getJsonErrorMsg(detail::JsonErrorCode::UnexpectedEndOfInput));
 
   auto *node = m_nodeStack.top();
-  node->m_value.emplace<JsonObj_t *>(new JsonObj_t{});
+  *node = JsonObj_t{};
   if (is.ch() == '}') {
     is.next();
     popStack();
@@ -1384,26 +1428,25 @@ inline void JsonParser::beginObject(DerivedInputStream &is) {
           getJsonErrorMsg(detail::JsonErrorCode::InvalidKeyValuePair));
 
     auto key = parseKeyWithColon(is);
-    m_nodeStack.push(&(std::get<JsonObj_t *>(node->m_value)
-                           ->emplace(std::move(key), JsonNode{})
-                           .first->second));
+    m_nodeStack.push(
+        &(node->val_.o->emplace(std::move(key), JsonNode{}).first->second));
   }
 }
 
 template <typename DerivedInputStream>
 inline void JsonParser::handleComma(DerivedInputStream &is) {
   auto *node = m_nodeStack.top();
-  if (node->isArr()) {
-    auto &arr = *std::get<JsonArr_t *>(node->m_value);
-    m_nodeStack.push(&arr.emplace_back());
-  } else if (node->isObj()) {
+  if (node->ty_ == JsonNode::ArrType_) {
+    m_nodeStack.push(&node->val_.a->emplace_back());
+  } else if (node->ty_ == JsonNode::ObjType_) {
     skipSpace(is);
-    auto &obj = *std::get<JsonObj_t *>(node->m_value);
     if (is.eoi() || is.get() != '"')
       throw std::runtime_error(
           getJsonErrorMsg(detail::JsonErrorCode::UnexpectedEndOfInput));
+
     auto key = parseKeyWithColon(is);
-    m_nodeStack.push(&(obj.emplace(std::move(key), JsonNode{}).first->second));
+    m_nodeStack.push(
+        &(node->val_.o->emplace(std::move(key), JsonNode{}).first->second));
   } else {
     throw std::runtime_error(
         getJsonErrorMsg(detail::JsonErrorCode::InvalidArrayOrObject));
@@ -1412,6 +1455,8 @@ inline void JsonParser::handleComma(DerivedInputStream &is) {
 
 template <typename DerivedInputStream>
 inline void JsonParser::parseNumber(DerivedInputStream &is, JsonNode *node) {
+  *node = JsonNode{};
+
   std::string numStr;
 
   bool isSigned = false;
@@ -1458,16 +1503,10 @@ inline void JsonParser::parseNumber(DerivedInputStream &is, JsonNode *node) {
   }
 
   std::from_chars_result result{};
-  union {
-    double d;
-    int64_t i;
-    uint64_t u;
-  } num{};
-
   if (isFloatingPoint) {
-    result =
-        std::from_chars(numStr.data(), numStr.data() + numStr.size(), num.d);
-    node->m_value.emplace<double>(num.d);
+    node->ty_ = JsonNode::DoubleType_;
+    result = std::from_chars(numStr.data(), numStr.data() + numStr.size(),
+                             node->val_.d);
   } else if (isSigned) {
     constexpr std::string_view maxSignedIntStr = "9223372036854775808"; // 2^63
     size_t unsignedLen = numStr.size() - 1;
@@ -1486,13 +1525,13 @@ inline void JsonParser::parseNumber(DerivedInputStream &is, JsonNode *node) {
     }
 
     if (overflow) {
-      result =
-          std::from_chars(numStr.data(), numStr.data() + numStr.size(), num.d);
-      node->m_value.emplace<double>(num.d);
+      node->ty_ = JsonNode::DoubleType_;
+      result = std::from_chars(numStr.data(), numStr.data() + numStr.size(),
+                               node->val_.d);
     } else {
-      result =
-          std::from_chars(numStr.data(), numStr.data() + numStr.size(), num.i);
-      node->m_value.emplace<int64_t>(num.i);
+      node->ty_ = JsonNode::IntType_;
+      result = std::from_chars(numStr.data(), numStr.data() + numStr.size(),
+                               node->val_.i);
     }
 
   } else {
@@ -1513,13 +1552,13 @@ inline void JsonParser::parseNumber(DerivedInputStream &is, JsonNode *node) {
     }
 
     if (overflow) {
-      result =
-          std::from_chars(numStr.data(), numStr.data() + numStr.size(), num.d);
-      node->m_value.emplace<double>(num.d);
+      node->ty_ = JsonNode::DoubleType_;
+      result = std::from_chars(numStr.data(), numStr.data() + numStr.size(),
+                               node->val_.d);
     } else {
-      result =
-          std::from_chars(numStr.data(), numStr.data() + numStr.size(), num.u);
-      node->m_value.emplace<uint64_t>(num.u);
+      node->ty_ = JsonNode::UintType_;
+      result = std::from_chars(numStr.data(), numStr.data() + numStr.size(),
+                               node->val_.u);
     }
   }
 
