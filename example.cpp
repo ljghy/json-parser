@@ -58,4 +58,20 @@ int main() {
   std::cout.precision(4);
   json6.dump(std::cout);
   std::cout << std::endl;
+
+  std::string_view multipleJsonStr = R"(
+    null
+    true false
+    123 456.789
+    "abc"
+    [1, 2, 3]
+    {"a": 1, "b": 2}
+  )";
+  size_t pos = 0;
+  JsonNode json7;
+  while (pos < multipleJsonStr.size()) {
+    auto j = parser.parse(multipleJsonStr, &pos);
+    json7.push_back(std::move(j));
+  }
+  std::cout << json7.toString(2) << std::endl;
 }
