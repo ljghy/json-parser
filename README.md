@@ -66,9 +66,8 @@ int main() {
   std::cout << "Empty object: " << JsonNode(JsonObj_t{}).toString()
             << std::endl;
 
-  JsonNode json6{3.14159, 2.71828};
-  std::cout.precision(4);
-  json6.dump(std::cout);
+  JsonNode json6{3.14159, 2.71828, json5};
+  json6.serializer().indent(2).ascii(true).precision(3).dump(std::cout);
   std::cout << std::endl;
 
   std::string_view multipleJsonStr = R"(

@@ -862,7 +862,46 @@ public:
   ConstReverseIterator crend() const { return rend(); }
 
   // serialization
+private:
+  class Serializer {
+  public:
+    Serializer(const JsonNode &node) : m_node(node) {}
+    Serializer(const Serializer &) = delete;
+    Serializer &operator=(const Serializer &) = delete;
+
+    Serializer &precision(size_t p) {
+      m_precision = p;
+      return *this;
+    }
+
+    Serializer &indent(size_t i) {
+      m_indent = i;
+      return *this;
+    }
+
+    Serializer &ascii(bool a) {
+      m_ascii = a;
+      return *this;
+    }
+
+    Serializer &dump(std::ostream &os) {
+      size_t p = os.precision();
+      os.precision(m_precision);
+      m_node.dump(os, m_indent, m_ascii);
+      os << std::setprecision(p);
+      return *this;
+    }
+
+  private:
+    const JsonNode &m_node;
+    size_t m_precision = 16;
+    size_t m_indent = -1;
+    bool m_ascii = true;
+  };
+
 public:
+  Serializer serializer() const { return Serializer(*this); }
+
   void dump(std::ostream &os, size_t indent = -1, bool ascii = true) const {
 
     bool formatted = (indent != static_cast<size_t>(-1));
@@ -894,7 +933,9 @@ public:
         stateStack.pop();
         break;
       case StrType_:
-        os << "\"" << toJsonString(*(node->val_.s), ascii) << "\"";
+        os << "\"";
+        toJsonString(os, *(node->val_.s), ascii);
+        os << "\"";
         stateStack.pop();
         break;
       case ArrType_: {
@@ -950,7 +991,9 @@ public:
         }
 
         if (it != obj.cend()) {
-          os << "\"" << toJsonString(it->first, ascii) << "\":";
+          os << "\"";
+          toJsonString(os, it->first, ascii);
+          os << "\":";
           const auto child = &(it->second);
           ++it;
           stateStack.emplace(child);
@@ -972,47 +1015,46 @@ public:
 
   std::string toString(size_t indent = -1, bool ascii = true) const {
     std::stringstream ss;
+    ss << std::setprecision(16);
     dump(ss, indent, ascii);
     return ss.str();
   }
 
 private:
-  static std::string toJsonString(const JsonStr_t &src, bool ascii) {
-    std::stringstream ss;
+  static void toJsonString(std::ostream &os, const JsonStr_t &src, bool ascii) {
     for (auto ite = src.begin(); ite != src.end(); ++ite) {
       switch (*ite) {
       case '"':
       case '\\':
       case '/':
-        ss << '\\' << *ite;
+        os << '\\' << *ite;
         break;
       case '\b':
-        ss << "\\b";
+        os << "\\b";
         break;
       case '\f':
-        ss << "\\f";
+        os << "\\f";
         break;
       case '\n':
-        ss << "\\n";
+        os << "\\n";
         break;
       case '\r':
-        ss << "\\r";
+        os << "\\r";
         break;
       case '\t':
-        ss << "\\t";
+        os << "\\t";
         break;
       default: {
         if (ascii && *ite & 0x80)
-          ss << decodeUtf8(ite);
+          decodeUtf8(os, ite);
         else
-          ss << *ite;
+          os << *ite;
       } break;
       }
     }
-    return ss.str();
   }
 
-  static std::string decodeUtf8(std::string::const_iterator &ite) {
+  static void decodeUtf8(std::ostream &os, std::string::const_iterator &ite) {
     uint32_t u = 0;
     if (!(*ite & 0x20)) {
       u = ((*ite & 0x1F) << 6) | (*(ite + 1) & 0x3F);
@@ -1031,20 +1073,21 @@ private:
       uint32_t l = 0xDC00 + (u & 0x3FF);
       uint32_t u0 = ((u - 0x10000) >> 10) + 0xD800;
       if (u0 <= 0xDBFF) {
-        return toHex4(u0) + toHex4(l);
+        toHex4(os, u0);
+        toHex4(os, l);
       }
     }
-    return toHex4(u);
+    toHex4(os, u);
   }
 
-  static std::string toHex4(uint32_t u) {
+  static void toHex4(std::ostream &os, uint32_t u) {
     char h[4];
     for (int i = 3; i >= 0; --i) {
       h[i] = u & 0xF;
       h[i] = h[i] < 10 ? (h[i] + '0') : (h[i] - 10 + 'a');
       u >>= 4;
     }
-    return "\\u" + std::string(h, 4);
+    os << "\\u" << h[0] << h[1] << h[2] << h[3];
   }
 
 private:
