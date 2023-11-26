@@ -1052,14 +1052,37 @@ private:
 
   class JsonFileInputStream : public JsonInputStreamBase<JsonFileInputStream> {
   public:
-    JsonFileInputStream(std::istream &is) : m_is(is) {}
-    char ch() const { return m_is.peek(); }
-    void next() { m_is.get(); }
-    char get() { return m_is.get(); }
-    bool eoi() const { return m_is.eof(); }
+    JsonFileInputStream(std::istream &is)
+        : m_is(is), m_bufPos(m_buf.size()), m_endPos(-1) {
+      fillBuf();
+    }
+    char ch() const { return m_buf[m_bufPos]; }
+    void next() {
+      ++m_bufPos;
+      if (m_bufPos == m_buf.size())
+        fillBuf();
+    }
+    char get() {
+      char c = m_buf[m_bufPos++];
+      if (m_bufPos == m_buf.size())
+        fillBuf();
+      return c;
+    }
+    bool eoi() const { return m_bufPos == m_endPos; }
+
+  private:
+    void fillBuf() {
+      m_is.read(m_buf.data(), m_buf.size());
+      m_bufPos = 0;
+      if (m_is.eof())
+        m_endPos = m_is.gcount();
+    }
 
   private:
     std::istream &m_is;
+    std::array<char, 64> m_buf;
+    size_t m_bufPos;
+    size_t m_endPos;
   };
 
   class JsonStringViewInputStream
