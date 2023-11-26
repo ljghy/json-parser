@@ -1,6 +1,7 @@
 #ifndef JSON_PARSER_HPP_
 #define JSON_PARSER_HPP_
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
