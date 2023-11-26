@@ -36,6 +36,7 @@ using JsonObj_t = std::map<std::string, JsonNode>;
 
 struct JsonKeyLiteral_t {
   std::string_view key;
+  JsonKeyLiteral_t(const std::string_view &k) : key(k) {}
 };
 
 inline JsonKeyLiteral_t operator""_key(const char *key, size_t len) {
