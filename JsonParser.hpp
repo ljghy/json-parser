@@ -651,7 +651,9 @@ public:
   }
 
   template <typename T>
-  typename std::enable_if_t<std::is_arithmetic_v<T>, const T> get() const {
+  typename std::enable_if_t<std::is_arithmetic_v<T> && !std::is_same_v<T, bool>,
+                            const T>
+  get() const {
     switch (ty_) {
     case DoubleType_:
       return static_cast<T>(val_.d);
