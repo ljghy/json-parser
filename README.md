@@ -15,11 +15,10 @@ g++ test.cpp -o test -std=c++17
 int main() {
   std::string jsonStr =
       "{\"name\": \"sphere\", \"center\": [1.0, 2.0, 3.0], \"radius\": 0.5}";
-  JsonParser parser;
   // parse
   JsonNode json1;
   try {
-    json1 = parser.parse(jsonStr);
+    json1 = parseJsonString(jsonStr);
   } catch (const std::exception &e) {
     std::cerr << e.what() << std::endl;
   }
@@ -54,10 +53,10 @@ int main() {
 
   // parse utf-8 encoded string
   jsonStr = reinterpret_cast<const char *>(+u8"\"z\u00df\u6c34\U0001f34c\"");
-  JsonNode json4 = parser.parse(jsonStr);
+  JsonNode json4 = parseJsonString(jsonStr);
   std::cout << json4.toString() << std::endl; // decode utf-8
 
-  JsonNode json5 = parser.parse("[\"z\\u00df\\u6c34\\ud83c\\udf4c\"]");
+  JsonNode json5 = parseJsonString("[\"z\\u00df\\u6c34\\ud83c\\udf4c\"]");
   std::cout << json5.toString(4, false) << std::endl; // utf-8 encoded
 
   std::cout << "Empty: " << JsonNode{}.toString() << std::endl;
@@ -81,7 +80,7 @@ int main() {
   size_t pos = 0;
   JsonNode json7;
   while (pos < multipleJsonStr.size()) {
-    auto j = parser.parse(multipleJsonStr, &pos);
+    auto j = parseJsonString(multipleJsonStr, &pos);
     json7.push_back(std::move(j));
   }
   std::cout << json7.toString(2) << std::endl;

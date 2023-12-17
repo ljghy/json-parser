@@ -1346,9 +1346,9 @@ JsonParser::parse(DerivedInputStream &is, bool checkEnd) {
   return ret;
 }
 
-inline JsonNode JsonParser::parse(std::string_view input_view, size_t *offset) {
+inline JsonNode JsonParser::parse(std::string_view inputView, size_t *offset) {
   auto stringViewInputStream =
-      JsonStringViewInputStream(input_view, offset == nullptr ? 0 : *offset);
+      JsonStringViewInputStream(inputView, offset == nullptr ? 0 : *offset);
   auto ret = parse(stringViewInputStream, offset == nullptr);
   if (offset != nullptr)
     *offset = stringViewInputStream.pos();
@@ -1733,6 +1733,20 @@ inline void JsonParser::parseNumber(DerivedInputStream &is, JsonNode *node) {
     throw std::runtime_error(
         getJsonErrorMsg(detail::JsonErrorCode::InvalidNumber));
   }
+}
+
+inline JsonNode parseJsonString(std::string_view inputView,
+                                size_t *offset = nullptr) {
+  return JsonParser{}.parse(inputView, offset);
+}
+
+inline JsonNode parseJsonFile(std::string_view filename, bool checkEnd = true) {
+  std::ifstream ifs(filename.data());
+  return JsonParser{}.parse(ifs, checkEnd);
+}
+
+inline JsonNode parseJsonFile(std::ifstream &is, bool checkEnd = true) {
+  return JsonParser{}.parse(is, checkEnd);
 }
 
 #endif

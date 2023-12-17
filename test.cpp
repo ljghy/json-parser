@@ -1,11 +1,9 @@
 #include "JsonParser.hpp"
 #include <filesystem>
-#include <fstream>
 #include <iostream>
 #include <sstream>
 
 int main() {
-  JsonParser parser;
   JsonNode json;
   std::string dir = "tests/JSONTestSuite/test_parsing/";
 
@@ -20,8 +18,7 @@ int main() {
         ss.str().substr(dir.size() + 1, ss.str().size() - dir.size() - 2);
     std::string path = dir + filename;
     try {
-      std::ifstream fin(path, std::ios::binary);
-      json = parser.parse(fin);
+      json = parseJsonFile(path);
     } catch (const std::exception &e) {
       success = false;
     }
