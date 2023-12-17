@@ -545,7 +545,7 @@ public:
     return val_.o->at(key);
   }
 
-  bool hasKey(const JsonStr_t &key) const {
+  bool contains(const JsonStr_t &key) const {
     requireType(ObjType_);
     return val_.o->find(key) != val_.o->end();
   }

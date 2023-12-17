@@ -35,7 +35,7 @@ int main() {
                     {"false"_key, false},
                     {"null"_key, JsonNull},
                     {"arr"_key, {1, "2", {3}}}};
-  if (json3.hasKey("arr"))
+  if (json3.contains("arr"))
     std::cout << json3["arr"].toString() << std::endl;
   std::cout << json3.toString() << std::endl;
 
