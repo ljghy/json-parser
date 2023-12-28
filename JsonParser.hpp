@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <fstream>
 #include <initializer_list>
 #include <iomanip>
@@ -672,6 +673,18 @@ public:
   get() const {
     requireType(StrType_);
     return val_.s->c_str();
+  }
+
+  template <typename T>
+  typename std::enable_if_t<std::is_same_v<T, std::filesystem::path>,
+                            std::filesystem::path>
+  get() const {
+    requireType(StrType_);
+#if __cplusplus >= 202002L
+    return std::filesystem::path(reinterpret_cast<char8_t *>(val_.s->data()));
+#else
+    return std::filesystem::u8path(*val_.s);
+#endif
   }
 
   // Iterators
