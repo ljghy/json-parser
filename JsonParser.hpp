@@ -681,7 +681,8 @@ public:
   get() const {
     requireType(StrType_);
 #if __cplusplus >= 202002L
-    return std::filesystem::path(reinterpret_cast<char8_t *>(val_.s->data()));
+    char8_t *u8str = reinterpret_cast<char8_t *>(val_.s->data());
+    return std::filesystem::path(u8str, u8str + val_.s->size());
 #else
     return std::filesystem::u8path(*val_.s);
 #endif
