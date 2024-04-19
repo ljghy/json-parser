@@ -911,14 +911,15 @@ private:
   private:
     const JsonNode &m_node;
     size_t m_precision = 16;
-    size_t m_indent = -1;
+    size_t m_indent = static_cast<size_t>(-1);
     bool m_ascii = true;
   };
 
 public:
   Serializer serializer() const { return Serializer(*this); }
 
-  void dump(std::ostream &os, size_t indent = -1, bool ascii = true) const {
+  void dump(std::ostream &os, size_t indent = static_cast<size_t>(-1),
+            bool ascii = true) const {
 
     bool formatted = (indent != static_cast<size_t>(-1));
 
@@ -1029,7 +1030,8 @@ public:
     }
   }
 
-  std::string toString(size_t indent = -1, bool ascii = true) const {
+  std::string toString(size_t indent = static_cast<size_t>(-1),
+                       bool ascii = true) const {
     std::stringstream ss;
     ss << std::setprecision(16);
     dump(ss, indent, ascii);
@@ -1160,7 +1162,7 @@ private:
       : public JsonInputStreamBase<JsonFileInputStream<BufSize>> {
   public:
     JsonFileInputStream(std::istream &is)
-        : m_is(is), m_bufPos(BufSize), m_endPos(-1) {
+        : m_is(is), m_bufPos(BufSize), m_endPos(static_cast<size_t>(-1)) {
       fillBuf();
     }
 
@@ -1226,9 +1228,7 @@ private:
 
 private:
   template <typename DerivedInputStream>
-  typename std::enable_if_t<IsJsonInputStream<DerivedInputStream>::value,
-                            JsonNode>
-  parse(DerivedInputStream &, bool checkEnd);
+  JsonNode parse(DerivedInputStream &, bool checkEnd);
 
   template <typename DerivedInputStream> void skipSpace(DerivedInputStream &);
 
@@ -1288,9 +1288,7 @@ private:
 };
 
 template <typename DerivedInputStream>
-inline typename std::enable_if_t<
-    JsonParser::IsJsonInputStream<DerivedInputStream>::value, JsonNode>
-JsonParser::parse(DerivedInputStream &is, bool checkEnd) {
+inline JsonNode JsonParser::parse(DerivedInputStream &is, bool checkEnd) {
   m_nodeStack = {};
 
   JsonNode ret;
