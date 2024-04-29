@@ -1149,11 +1149,13 @@ public:
 private:
   template <typename Derived> class JsonInputStreamBase {
   public:
-    char ch() const { return (static_cast<Derived *>(this))->ch(); } // peek
+    char ch() const {
+      return (static_cast<const Derived *>(this))->ch();
+    } // peek
     void next() { (static_cast<Derived *>(this))->next(); }
     char get() { return (static_cast<Derived *>(this))->get(); }
     bool eoi() const {
-      return (static_cast<Derived *>(this))->eoi();
+      return (static_cast<const Derived *>(this))->eoi();
     } // end of input
   };
 
@@ -1223,43 +1225,40 @@ private:
     std::string_view::const_iterator m_pos;
   };
 
-  template <typename T>
-  using IsJsonInputStream = std::is_base_of<JsonInputStreamBase<T>, T>;
-
 private:
-  template <typename DerivedInputStream>
-  JsonNode parse(DerivedInputStream &, bool checkEnd);
+  template <typename Derived>
+  JsonNode parse(JsonInputStreamBase<Derived> &, bool checkEnd);
 
-  template <typename DerivedInputStream> void skipSpace(DerivedInputStream &);
+  template <typename Derived> void skipSpace(JsonInputStreamBase<Derived> &);
 
-  template <typename DerivedInputStream>
-  void parseLiteral(DerivedInputStream &, JsonNode *);
+  template <typename Derived>
+  void parseLiteral(JsonInputStreamBase<Derived> &, JsonNode *);
 
-  template <typename DerivedInputStream>
-  JsonStr_t parseString(DerivedInputStream &);
+  template <typename Derived>
+  JsonStr_t parseString(JsonInputStreamBase<Derived> &);
 
-  template <typename DerivedInputStream>
-  void parseEscape(DerivedInputStream &, JsonStr_t &);
+  template <typename Derived>
+  void parseEscape(JsonInputStreamBase<Derived> &, JsonStr_t &);
 
-  template <typename DerivedInputStream>
-  void parseUtf8(DerivedInputStream &, JsonStr_t &);
+  template <typename Derived>
+  void parseUtf8(JsonInputStreamBase<Derived> &, JsonStr_t &);
 
-  template <typename DerivedInputStream>
-  uint32_t parseHex4(DerivedInputStream &);
+  template <typename Derived>
+  uint32_t parseHex4(JsonInputStreamBase<Derived> &);
 
   void encodeUtf8(JsonStr_t &, uint32_t);
 
-  template <typename DerivedInputStream> void beginArray(DerivedInputStream &);
+  template <typename Derived> void beginArray(JsonInputStreamBase<Derived> &);
 
-  template <typename DerivedInputStream> void beginObject(DerivedInputStream &);
+  template <typename Derived> void beginObject(JsonInputStreamBase<Derived> &);
 
-  template <typename DerivedInputStream>
-  JsonStr_t parseKeyWithColon(DerivedInputStream &);
+  template <typename Derived>
+  JsonStr_t parseKeyWithColon(JsonInputStreamBase<Derived> &);
 
-  template <typename DerivedInputStream> void handleComma(DerivedInputStream &);
+  template <typename Derived> void handleComma(JsonInputStreamBase<Derived> &);
 
-  template <typename DerivedInputStream>
-  void parseNumber(DerivedInputStream &, JsonNode *);
+  template <typename Derived>
+  void parseNumber(JsonInputStreamBase<Derived> &, JsonNode *);
 
   void popStack() {
     if (!m_nodeStack.empty())
@@ -1287,8 +1286,9 @@ private:
   std::istream &m_is;
 };
 
-template <typename DerivedInputStream>
-inline JsonNode JsonParser::parse(DerivedInputStream &is, bool checkEnd) {
+template <typename Derived>
+inline JsonNode JsonParser::parse(JsonInputStreamBase<Derived> &is,
+                                  bool checkEnd) {
   m_nodeStack = {};
 
   JsonNode ret;
@@ -1379,16 +1379,17 @@ inline JsonNode JsonParser::parse(std::istream &is, bool checkEnd) {
   return parse(fileInputStream, checkEnd);
 }
 
-template <typename DerivedInputStream>
-inline void JsonParser::skipSpace(DerivedInputStream &is) {
+template <typename Derived>
+inline void JsonParser::skipSpace(JsonInputStreamBase<Derived> &is) {
   while (!is.eoi() && (is.ch() == ' ' || is.ch() == '\t' || is.ch() == '\n' ||
                        is.ch() == '\r')) {
     is.next();
   }
 }
 
-template <typename DerivedInputStream>
-inline void JsonParser::parseLiteral(DerivedInputStream &is, JsonNode *node) {
+template <typename Derived>
+inline void JsonParser::parseLiteral(JsonInputStreamBase<Derived> &is,
+                                     JsonNode *node) {
   if (is.ch() == 'n') {
     is.next();
     if (!is.eoi() && is.get() == 'u' && !is.eoi() && is.get() == 'l' &&
@@ -1417,8 +1418,8 @@ inline void JsonParser::parseLiteral(DerivedInputStream &is, JsonNode *node) {
       getJsonErrorMsg(detail::JsonErrorCode::InvalidLiteral));
 }
 
-template <typename DerivedInputStream>
-inline JsonStr_t JsonParser::parseString(DerivedInputStream &is) {
+template <typename Derived>
+inline JsonStr_t JsonParser::parseString(JsonInputStreamBase<Derived> &is) {
   JsonStr_t ret;
 
   while (!is.eoi() && is.ch() != '"') {
@@ -1444,8 +1445,9 @@ inline JsonStr_t JsonParser::parseString(DerivedInputStream &is) {
   return ret;
 }
 
-template <typename DerivedInputStream>
-inline void JsonParser::parseEscape(DerivedInputStream &is, JsonStr_t &ret) {
+template <typename Derived>
+inline void JsonParser::parseEscape(JsonInputStreamBase<Derived> &is,
+                                    JsonStr_t &ret) {
   if (is.eoi())
     throw std::runtime_error(
         getJsonErrorMsg(detail::JsonErrorCode::InvalidString));
@@ -1504,8 +1506,8 @@ inline void JsonParser::parseEscape(DerivedInputStream &is, JsonStr_t &ret) {
   }
 }
 
-template <typename DerivedInputStream>
-inline uint32_t JsonParser::parseHex4(DerivedInputStream &is) {
+template <typename Derived>
+inline uint32_t JsonParser::parseHex4(JsonInputStreamBase<Derived> &is) {
   uint32_t u = 0;
   for (int i = 0; i < 4; ++i) {
     if (is.eoi())
@@ -1528,8 +1530,9 @@ inline uint32_t JsonParser::parseHex4(DerivedInputStream &is) {
   return u;
 }
 
-template <typename DerivedInputStream>
-inline void JsonParser::parseUtf8(DerivedInputStream &is, JsonStr_t &ret) {
+template <typename Derived>
+inline void JsonParser::parseUtf8(JsonInputStreamBase<Derived> &is,
+                                  JsonStr_t &ret) {
   uint8_t u = static_cast<uint8_t>(is.ch()), byteCount = 0;
   if ((u <= 0x7F))
     byteCount = 1;
@@ -1572,8 +1575,9 @@ inline void JsonParser::encodeUtf8(JsonStr_t &ret, uint32_t u) {
   }
 }
 
-template <typename DerivedInputStream>
-inline JsonStr_t JsonParser::parseKeyWithColon(DerivedInputStream &is) {
+template <typename Derived>
+inline JsonStr_t
+JsonParser::parseKeyWithColon(JsonInputStreamBase<Derived> &is) {
   auto key = parseString(is);
   skipSpace(is);
   if (is.eoi() || is.get() != ':')
@@ -1583,8 +1587,8 @@ inline JsonStr_t JsonParser::parseKeyWithColon(DerivedInputStream &is) {
   return key;
 }
 
-template <typename DerivedInputStream>
-inline void JsonParser::beginArray(DerivedInputStream &is) {
+template <typename Derived>
+inline void JsonParser::beginArray(JsonInputStreamBase<Derived> &is) {
   skipSpace(is);
   if (is.eoi())
     throw std::runtime_error(
@@ -1600,8 +1604,8 @@ inline void JsonParser::beginArray(DerivedInputStream &is) {
   }
 }
 
-template <typename DerivedInputStream>
-inline void JsonParser::beginObject(DerivedInputStream &is) {
+template <typename Derived>
+inline void JsonParser::beginObject(JsonInputStreamBase<Derived> &is) {
   skipSpace(is);
   if (is.eoi())
     throw std::runtime_error(
@@ -1623,8 +1627,8 @@ inline void JsonParser::beginObject(DerivedInputStream &is) {
   }
 }
 
-template <typename DerivedInputStream>
-inline void JsonParser::handleComma(DerivedInputStream &is) {
+template <typename Derived>
+inline void JsonParser::handleComma(JsonInputStreamBase<Derived> &is) {
   auto *node = m_nodeStack.top();
   if (node->ty_ == JsonNode::ArrType_) {
     m_nodeStack.push(&node->val_.a->emplace_back());
@@ -1643,8 +1647,9 @@ inline void JsonParser::handleComma(DerivedInputStream &is) {
   }
 }
 
-template <typename DerivedInputStream>
-inline void JsonParser::parseNumber(DerivedInputStream &is, JsonNode *node) {
+template <typename Derived>
+inline void JsonParser::parseNumber(JsonInputStreamBase<Derived> &is,
+                                    JsonNode *node) {
   std::string numStr;
 
   bool isSigned = false;
