@@ -8,7 +8,6 @@
 #include <initializer_list>
 #include <iomanip>
 #include <map>
-#include <sstream>
 #include <stack>
 #include <stdexcept>
 #include <string>
@@ -300,7 +299,7 @@ private:
 
   template <typename T>
   static constexpr bool is_resizable_sequence_container_v =
-      has_subscript_op_v<T> &&has_resize_op_v<T> && !std::is_pointer_v<T>;
+      has_subscript_op_v<T> && has_resize_op_v<T> && !std::is_pointer_v<T>;
 
   template <typename T, typename = void>
   struct is_associative_container : std::false_type {};
