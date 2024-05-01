@@ -119,6 +119,7 @@ public:
   template <> auto get<NumberLike>() const;
   template <> auto get<std::filesystem::path>() const;
   template <> auto get<ArrayLike>(const size_t n = -1, size_t offset = 0, const size_t stride = 1) const;
+  template <> auto get<MapLike>() const;
 
   template <typename T> auto get(const std::string &) const;
 
@@ -249,17 +250,21 @@ private:
 
   // Traits
 private:
-  template <typename T> struct isSignedIntegral {
+  template <typename T> struct is_signed_integral {
     static constexpr bool value =
         std::is_integral_v<T> && std::is_signed_v<T> &&
         !std::is_same_v<T, char> && !std::is_same_v<T, bool>;
   };
+  template <typename T>
+  static constexpr bool is_signed_integral_v = is_signed_integral<T>::value;
 
-  template <typename T> struct isUnsignedIntegral {
+  template <typename T> struct is_unsigned_integral {
     static constexpr bool value =
-        std::is_integral<T>::value && std::is_unsigned<T>::value &&
+        std::is_integral_v<T> && std::is_unsigned_v<T> &&
         !std::is_same_v<T, char> && !std::is_same_v<T, bool>;
   };
+  template <typename T>
+  static constexpr bool is_unsigned_integral_v = is_unsigned_integral<T>::value;
 
   template <typename T, typename = void>
   struct has_subscript_op : std::false_type {};
@@ -347,13 +352,13 @@ public:
   }
 
   template <typename T,
-            typename std::enable_if_t<isSignedIntegral<T>::value, int> = 0>
+            typename std::enable_if_t<is_signed_integral_v<T>, int> = 0>
   JsonNode(T num) : ty_(IntType_) {
     val_.i = static_cast<int64_t>(num);
   }
 
   template <typename T,
-            typename std::enable_if_t<isUnsignedIntegral<T>::value, int> = 0>
+            typename std::enable_if_t<is_unsigned_integral_v<T>, int> = 0>
   JsonNode(T num) : ty_(UintType_) {
     val_.u = static_cast<uint64_t>(num);
   }
@@ -588,7 +593,7 @@ public:
   }
 
   template <typename T>
-  typename std::enable_if_t<isSignedIntegral<T>::value, JsonNode &>
+  typename std::enable_if_t<is_signed_integral_v<T>, JsonNode &>
   operator=(T value) {
     clear();
     ty_ = IntType_;
@@ -597,7 +602,7 @@ public:
   }
 
   template <typename T>
-  typename std::enable_if_t<isUnsignedIntegral<T>::value, JsonNode &>
+  typename std::enable_if_t<is_unsigned_integral_v<T>, JsonNode &>
   operator=(T value) {
     clear();
     ty_ = UintType_;
