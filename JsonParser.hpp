@@ -795,12 +795,14 @@ public:
   template <typename Container>
   static constexpr bool hasResizeOp_v = hasResizeOp<Container>::value;
 
-  template <typename Container> struct valueTypeOf {
-    using type =
-        std::remove_reference_t<decltype(std::declval<const Container>()[0])>;
+  template <typename T, typename = void> struct getValueType {
+    using type = std::remove_reference_t<decltype(std::declval<T>()[0])>;
   };
-  template <typename Container>
-  using valueTypeOf_t = typename valueTypeOf<Container>::type;
+  template <typename T>
+  struct getValueType<T, std::void_t<typename T::value_type>> {
+    using type = typename T::value_type;
+  };
+  template <typename T> using getValueType_t = typename getValueType<T>::type;
 
   template <typename T>
   typename std::enable_if_t<
@@ -809,7 +811,7 @@ public:
       const size_t stride = 1) const {
     requireType(ArrType_);
     auto &arr = *val_.a;
-    using ValueType = valueTypeOf_t<T>;
+    using ValueType = getValueType_t<T>;
     T ret{};
     for (size_t i = 0; offset < arr.size() && i < n; offset += stride, ++i) {
       ret[i] = arr[offset].get<ValueType>();
@@ -824,7 +826,7 @@ public:
       const size_t stride = 1) const {
     requireType(ArrType_);
     auto &arr = *val_.a;
-    using ValueType = valueTypeOf_t<T>;
+    using ValueType = getValueType_t<T>;
     T ret{};
     ret.resize(n == static_cast<size_t>(-1) ? arr.size() : n);
     for (size_t i = 0; offset < arr.size() && i < n; offset += stride, ++i) {
