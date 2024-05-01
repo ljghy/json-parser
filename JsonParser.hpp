@@ -1,15 +1,12 @@
 #ifndef JSON_PARSER_HPP_
 #define JSON_PARSER_HPP_
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <initializer_list>
 #include <iomanip>
-#include <ios>
-#include <iosfwd>
 #include <map>
 #include <sstream>
 #include <stack>
@@ -17,14 +14,140 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
-#include <variant>
 #include <vector>
 
 // #define JSON_ENABLE_EMPTY_NODE
 // If JSON_ENABLE_EMPTY_NODE is defined, JsonNode can be empty to distinguish
 // from null. Otherwise, JsonNode is null by default.
 // Note that empty values are not valid json values and need to be cleared
-// manually before calling toString() or size() in order to get correct results.
+// manually before calling size() in order to get correct results.
+
+/*
+clang-format off
+
+Synopsis:
+
+constexpr struct JsonNull_t {} JsonNull;
+
+using JsonStr_t = std::string;
+using JsonArr_t = std::vector<JsonNode>;
+using JsonObj_t = std::map<std::string, JsonNode>;
+
+struct JsonKeyLiteral_t {
+  std::string_view key;
+  JsonKeyLiteral_t(const std::string_view &k);
+};
+
+JsonKeyLiteral_t operator""_key(const char *key, size_t len);
+
+class JsonNode {
+public:
+  JsonNode();
+  JsonNode(JsonNull_t);
+  JsonNode(bool);
+  JsonNode(const JsonStr_t &);
+  JsonNode(JsonStr_t &&);
+  JsonNode(const JsonArr_t &);
+  JsonNode(JsonArr_t &&);
+  JsonNode(const JsonObj_t &);
+  JsonNode(JsonObj_t &&);
+  template <typename NumberLike> JsonNode(NumberLike);
+  JsonNode(std::nullptr_t);
+  JsonNode(char);
+  JsonNode(const char *);
+  JsonNode(const std::initializer_list<JsonNode> &);
+  JsonNode(const std::initializer_list<std::pair<const JsonKeyLiteral_t, JsonNode>> &);
+
+  JsonNode(const JsonNode &);
+  JsonNode(JsonNode &&) noexcept;
+
+  ~JsonNode();
+
+  void clear();
+
+  JsonNode &operator=(const JsonNode &);
+  JsonNode &operator=(JsonNode &&) noexcept;
+  JsonNode &operator=(JsonNull_t);
+  JsonNode &operator=(bool);
+  template <typename NumberLike> JsonNode &operator=(NumberLike);
+  JsonNode &operator=(std::nullptr_t);
+  JsonNode &operator=(char);
+  JsonNode &operator=(const char *);
+
+  JsonStr_t &str();
+  const JsonStr_t &str() const;
+  JsonArr_t &arr();
+  const JsonArr_t &arr() const;
+  JsonObj_t &obj();
+  const JsonObj_t &obj() const;
+
+  void push_back(const JsonNode &);
+  void push_back(JsonNode &&);
+
+  JsonNode &operator[](size_t);
+  JsonNode &at(size_t);
+  const JsonNode &operator[](size_t) const;
+  const JsonNode &at(size_t) const;
+
+  JsonNode &operator[](const std::string &);
+  JsonNode &at(const std::string &);
+  const JsonNode &operator[](const std::string &) const;
+  const JsonNode &at(const std::string &) const;
+
+  bool contains(const JsonStr_t &) const;
+  JsonObj_t::iterator find(const JsonStr_t &);
+  JsonObj_t::const_iterator find(const JsonStr_t &) const;
+
+  size_t size() const;
+
+  JsonType type() const;
+  std::string typeStr() const;
+
+#ifdef JSON_ENABLE_EMPTY_NODE
+  bool isEmpty() const;
+#endif
+  bool isNull() const;
+  bool isBool() const;
+  bool isNum() const;
+  bool isStr() const;
+  bool isArr() const;
+  bool isObj() const;
+
+  template <typename T> T get() const;
+  template <> bool get<bool>() const;
+  template <> auto get<NumberLike>() const;
+  template <> auto get<std::filesystem::path>() const;
+  template <> auto get<ArrayLike>(const size_t n = -1, size_t offset = 0, const size_t stride = 1) const;
+
+  template <typename T> auto get(const std::string &) const;
+
+  class Serializer {
+  public:
+    Serializer &precision(size_t);
+    Serializer &indent(size_t);
+    Serializer &ascii(bool);
+    Serializer &dump(std::ostream &);
+  };
+
+  Serializer serializer() const;
+};
+
+class JsonParser {
+public:
+  JsonParser();
+  JsonNode parse(std::string_view, size_t *offset = nullptr);
+  JsonNode parse(std::ifstream &, bool checkEnd = true);
+  JsonNode parse(std::istream &, bool checkEnd = true);
+};
+
+JsonNode parseJsonString(std::string_view inputView, size_t *offset = nullptr);
+JsonNode parseJsonFile(std::string_view filename, bool checkEnd = true);
+JsonNode parseJsonFile(std::istream &is, bool checkEnd = true);
+std::istream &operator>>(std::istream &, JsonNode &);
+std::ostream &operator<<(std::ostream &, const JsonNode &);
+std::ostream &operator<<(std::ostream &, JsonNode::Serializer &);
+
+*/
 
 inline constexpr struct JsonNull_t {
 } JsonNull;
@@ -458,9 +581,12 @@ public:
   // Index and key
 private:
   void requireType(size_t ty) const {
+    (void)ty; // Suppress unused variable warning
+#ifndef NDEBUG
     if (ty_ != ty)
       throw std::runtime_error(
           getJsonErrorMsg(detail::JsonErrorCode::InvalidJsonAccess));
+#endif
   }
 
 public:
@@ -574,7 +700,6 @@ public:
   }
 
   // Type and getter
-private:
 public:
   JsonType type() const {
     constexpr JsonType types[]{
@@ -607,53 +732,22 @@ public:
   bool isObj() const { return type() == JsonType::Obj; }
 
   template <typename T>
-  typename std::enable_if_t<std::is_same_v<T, bool>, T &> get() {
-    requireType(BoolType_);
-    return val_.b;
-  }
-  template <typename T>
-  typename std::enable_if_t<std::is_same_v<T, JsonStr_t>, T &> get() {
-    requireType(StrType_);
-    return *val_.s;
-  }
-  template <typename T>
-  typename std::enable_if_t<std::is_same_v<T, JsonArr_t>, T &> get() {
-    requireType(ArrType_);
-    return *val_.a;
-  }
-  template <typename T>
-  typename std::enable_if_t<std::is_same_v<T, JsonObj_t>, T &> get() {
-    requireType(ObjType_);
-    return *val_.o;
-  }
-
-  template <typename T>
-  typename std::enable_if_t<std::is_same_v<T, bool>, const T> get() const {
-    requireType(BoolType_);
-    return val_.b;
-  }
-  template <typename T>
-  typename std::enable_if_t<std::is_same_v<T, JsonStr_t>, const T &>
-  get() const {
-    requireType(StrType_);
-    return *val_.s;
-  }
-  template <typename T>
-  typename std::enable_if_t<std::is_same_v<T, JsonArr_t>, const T &>
-  get() const {
-    requireType(ArrType_);
-    return *val_.a;
-  }
-  template <typename T>
-  typename std::enable_if_t<std::is_same_v<T, JsonObj_t>, const T &>
-  get() const {
-    requireType(ObjType_);
-    return *val_.o;
+  typename std::enable_if_t<std::is_same_v<T, bool>, T> get() const {
+    if (ty_ == BoolType_)
+      return val_.b;
+    if (ty_ == IntType_)
+      return static_cast<bool>(val_.i);
+    if (ty_ == UintType_)
+      return static_cast<bool>(val_.u);
+    if (ty_ == DoubleType_)
+      return static_cast<bool>(val_.d);
+    throw std::runtime_error(
+        getJsonErrorMsg(detail::JsonErrorCode::InvalidJsonAccess));
   }
 
   template <typename T>
   typename std::enable_if_t<std::is_arithmetic_v<T> && !std::is_same_v<T, bool>,
-                            const T>
+                            T>
   get() const {
     switch (ty_) {
     case DoubleType_:
@@ -669,13 +763,6 @@ public:
   }
 
   template <typename T>
-  typename std::enable_if_t<std::is_same_v<T, const char *>, const char *>
-  get() const {
-    requireType(StrType_);
-    return val_.s->c_str();
-  }
-
-  template <typename T>
   typename std::enable_if_t<std::is_same_v<T, std::filesystem::path>,
                             std::filesystem::path>
   get() const {
@@ -688,200 +775,76 @@ public:
 #endif
   }
 
-  // Iterators
-private:
-  template <typename ElemType, typename ArrIter, typename ObjIter>
-  class IteratorGen {
-  public:
-    IteratorGen(ArrIter iter) { m_iter.template emplace<0>(iter); }
-    IteratorGen(ObjIter iter) { m_iter.template emplace<1>(iter); }
+  template <typename Container>
+  using subscriptOp_t = decltype(std::declval<Container>()[size_t{}]);
+  template <typename Container, typename = void>
+  struct hasSubscriptOp : std::false_type {};
+  template <typename Container>
+  struct hasSubscriptOp<Container, std::void_t<subscriptOp_t<Container>>>
+      : std::true_type {};
+  template <typename Container>
+  static constexpr bool hasSubscriptOp_v = hasSubscriptOp<Container>::value;
 
-    IteratorGen &operator++() {
-      if (m_iter.index() == 0)
-        ++std::get<0>(m_iter);
-      else
-        ++std::get<1>(m_iter);
-      return *this;
-    }
+  template <typename Container>
+  using resizeOp_t = decltype(std::declval<Container>().resize(size_t{}));
+  template <typename Container, typename = void>
+  struct hasResizeOp : std::false_type {};
+  template <typename Container>
+  struct hasResizeOp<Container, std::void_t<resizeOp_t<Container>>>
+      : std::true_type {};
+  template <typename Container>
+  static constexpr bool hasResizeOp_v = hasResizeOp<Container>::value;
 
-    IteratorGen operator++(int) {
-      IteratorGen tmp = *this;
-      ++(*this);
-      return tmp;
-    }
-
-    IteratorGen &operator--() {
-      if (m_iter.index() == 0)
-        --std::get<0>(m_iter);
-      else
-        --std::get<1>(m_iter);
-      return *this;
-    }
-
-    IteratorGen operator--(int) {
-      IteratorGen tmp = *this;
-      --(*this);
-      return tmp;
-    }
-
-    bool operator==(const IteratorGen &rhs) const {
-#ifdef _MSC_VER
-      return m_iter.index() == rhs.m_iter.index() &&
-             ((m_iter.index() == 0 &&
-               std::get<0>(m_iter) == std::get<0>(rhs.m_iter)) ||
-              (m_iter.index() == 1 &&
-               std::get<1>(m_iter) == std::get<1>(rhs.m_iter)));
-#else
-      return m_iter == rhs.m_iter;
-#endif
-    }
-    bool operator==(const ArrIter &rhs) const {
-      return m_iter.index() == 0 && std::get<0>(m_iter) == rhs;
-    }
-    bool operator==(const ObjIter &rhs) const {
-      return m_iter.index() == 1 && std::get<1>(m_iter) == rhs;
-    }
-    friend bool operator==(const ArrIter &lhs, const IteratorGen &rhs) {
-      return rhs == lhs;
-    }
-    friend bool operator==(const ObjIter &lhs, const IteratorGen &rhs) {
-      return rhs == lhs;
-    }
-
-    bool operator!=(const IteratorGen &rhs) const {
-#ifdef _MSC_VER
-      return m_iter.index() != rhs.m_iter.index() ||
-             (m_iter.index() == 0 &&
-              std::get<0>(m_iter) != std::get<0>(rhs.m_iter)) ||
-             (m_iter.index() == 1 &&
-              std::get<1>(m_iter) != std::get<1>(rhs.m_iter));
-#else
-      return m_iter != rhs.m_iter;
-#endif
-    }
-    bool operator!=(const ArrIter &rhs) const {
-      return m_iter.index() != 0 || std::get<0>(m_iter) != rhs;
-    }
-    bool operator!=(const ObjIter &rhs) const {
-      return m_iter.index() != 1 || std::get<1>(m_iter) != rhs;
-    }
-    friend bool operator!=(const ArrIter &lhs, const IteratorGen &rhs) {
-      return rhs != lhs;
-    }
-    friend bool operator!=(const ObjIter &lhs, const IteratorGen &rhs) {
-      return rhs != lhs;
-    }
-
-    ElemType &operator*() const {
-      if (m_iter.index() == 0)
-        return *std::get<0>(m_iter);
-      else
-        return std::get<1>(m_iter)->second;
-    }
-    ElemType *operator->() const {
-      if (m_iter.index() == 0)
-        return &*std::get<0>(m_iter);
-      else
-        return &std::get<1>(m_iter)->second;
-    }
-
-  private:
-    std::variant<ArrIter, ObjIter> m_iter;
+  template <typename Container> struct valueTypeOf {
+    using type =
+        std::remove_reference_t<decltype(std::declval<const Container>()[0])>;
   };
+  template <typename Container>
+  using valueTypeOf_t = typename valueTypeOf<Container>::type;
 
-public:
-  using Iterator =
-      IteratorGen<JsonNode, JsonArr_t::iterator, JsonObj_t::iterator>;
-  using ConstIterator = IteratorGen<const JsonNode, JsonArr_t::const_iterator,
-                                    JsonObj_t::const_iterator>;
-  using ReverseIterator = IteratorGen<JsonNode, JsonArr_t::reverse_iterator,
-                                      JsonObj_t::reverse_iterator>;
-  using ConstReverseIterator =
-      IteratorGen<const JsonNode, JsonArr_t::const_reverse_iterator,
-                  JsonObj_t::const_reverse_iterator>;
+  template <typename T>
+  typename std::enable_if_t<
+      hasSubscriptOp_v<T> && !std::is_pointer_v<T> && !hasResizeOp_v<T>, T>
+  get(const size_t n = static_cast<size_t>(-1), size_t offset = 0,
+      const size_t stride = 1) const {
+    requireType(ArrType_);
+    auto &arr = *val_.a;
+    using ValueType = valueTypeOf_t<T>;
+    T ret{};
+    for (size_t i = 0; offset < arr.size() && i < n; offset += stride, ++i) {
+      ret[i] = arr[offset].get<ValueType>();
+    }
+    return ret;
+  }
 
-  Iterator begin() {
-    if (ty_ == ArrType_)
-      return val_.a->begin();
-    else if (ty_ == ObjType_)
-      return val_.o->begin();
-    else
-      throw std::runtime_error(
-          getJsonErrorMsg(detail::JsonErrorCode::InvalidJsonAccess));
+  template <typename T>
+  typename std::enable_if_t<
+      hasSubscriptOp_v<T> && !std::is_pointer_v<T> && hasResizeOp_v<T>, T>
+  get(const size_t n = static_cast<size_t>(-1), size_t offset = 0,
+      const size_t stride = 1) const {
+    requireType(ArrType_);
+    auto &arr = *val_.a;
+    using ValueType = valueTypeOf_t<T>;
+    T ret{};
+    ret.resize(n == static_cast<size_t>(-1) ? arr.size() : n);
+    for (size_t i = 0; offset < arr.size() && i < n; offset += stride, ++i) {
+      ret[i] = arr[offset].get<ValueType>();
+    }
+    return ret;
   }
-  Iterator end() {
-    if (ty_ == ArrType_)
-      return val_.a->end();
-    else if (ty_ == ObjType_)
-      return val_.o->end();
-    else
-      throw std::runtime_error(
-          getJsonErrorMsg(detail::JsonErrorCode::InvalidJsonAccess));
+
+  template <typename T> auto get(const std::string &key) const {
+    return (*this)[key].template get<T>();
   }
-  ConstIterator begin() const {
-    if (ty_ == ArrType_)
-      return val_.a->cbegin();
-    else if (ty_ == ObjType_)
-      return val_.o->cbegin();
-    else
-      throw std::runtime_error(
-          getJsonErrorMsg(detail::JsonErrorCode::InvalidJsonAccess));
-  }
-  ConstIterator end() const {
-    if (ty_ == ArrType_)
-      return val_.a->cend();
-    else if (ty_ == ObjType_)
-      return val_.o->cend();
-    else
-      throw std::runtime_error(
-          getJsonErrorMsg(detail::JsonErrorCode::InvalidJsonAccess));
-  }
-  ConstIterator cbegin() const { return begin(); }
-  ConstIterator cend() const { return end(); }
-  ReverseIterator rbegin() {
-    if (ty_ == ArrType_)
-      return val_.a->rbegin();
-    else if (ty_ == ObjType_)
-      return val_.o->rbegin();
-    else
-      throw std::runtime_error(
-          getJsonErrorMsg(detail::JsonErrorCode::InvalidJsonAccess));
-  }
-  ReverseIterator rend() {
-    if (ty_ == ArrType_)
-      return val_.a->rend();
-    else if (ty_ == ObjType_)
-      return val_.o->rend();
-    else
-      throw std::runtime_error(
-          getJsonErrorMsg(detail::JsonErrorCode::InvalidJsonAccess));
-  }
-  ConstReverseIterator rbegin() const {
-    if (ty_ == ArrType_)
-      return val_.a->crbegin();
-    else if (ty_ == ObjType_)
-      return val_.o->crbegin();
-    else
-      throw std::runtime_error(
-          getJsonErrorMsg(detail::JsonErrorCode::InvalidJsonAccess));
-  }
-  ConstReverseIterator rend() const {
-    if (ty_ == ArrType_)
-      return val_.a->crend();
-    else if (ty_ == ObjType_)
-      return val_.o->crend();
-    else
-      throw std::runtime_error(
-          getJsonErrorMsg(detail::JsonErrorCode::InvalidJsonAccess));
-  }
-  ConstReverseIterator crbegin() const { return rbegin(); }
-  ConstReverseIterator crend() const { return rend(); }
 
   // serialization
-private:
+public:
   class Serializer {
-  public:
+    friend class JsonNode;
+
     Serializer(const JsonNode &node) : m_node(node) {}
+
+  public:
     Serializer(const Serializer &) = delete;
     Serializer &operator=(const Serializer &) = delete;
 
@@ -903,9 +866,189 @@ private:
     Serializer &dump(std::ostream &os) {
       size_t p = os.precision();
       os.precision(m_precision);
-      m_node.dump(os, m_indent, m_ascii);
+
+      bool formatted = (m_indent != static_cast<size_t>(-1));
+
+      std::stack<ConstTraverseState> stateStack;
+      stateStack.emplace(&m_node);
+
+      while (!stateStack.empty()) {
+        auto node = stateStack.top().node;
+        switch (node->ty_) {
+        case NullType_:
+          os << "null";
+          stateStack.pop();
+          break;
+        case BoolType_:
+          os << (node->val_.b ? "true" : "false");
+          stateStack.pop();
+          break;
+        case DoubleType_:
+          os << node->val_.d;
+          stateStack.pop();
+          break;
+        case IntType_:
+          os << node->val_.i;
+          stateStack.pop();
+          break;
+        case UintType_:
+          os << node->val_.u;
+          stateStack.pop();
+          break;
+        case StrType_:
+          os << "\"";
+          toJsonString(os, *(node->val_.s), m_ascii);
+          os << "\"";
+          stateStack.pop();
+          break;
+        case ArrType_: {
+          const auto &arr = *node->val_.a;
+          if (arr.empty()) {
+            os << "[]";
+            stateStack.pop();
+            break;
+          }
+          auto &it = stateStack.top().arrIt;
+          if (it == arr.cbegin()) {
+            if (formatted)
+              os << "[\n" << std::setw(m_indent * stateStack.size()) << ' ';
+            else
+              os << '[';
+          } else if (it != arr.cend()) {
+            if (formatted)
+              os << ",\n" << std::setw(m_indent * stateStack.size()) << ' ';
+            else
+              os << ',';
+          }
+          if (it != arr.cend()) {
+            const auto child = &(*it);
+            ++it;
+            stateStack.emplace(child);
+          } else {
+            if (formatted)
+              os << '\n'
+                 << std::string(m_indent * (stateStack.size() - 1), ' ') << ']';
+            else
+              os << ']';
+            stateStack.pop();
+          }
+        } break;
+        case ObjType_: {
+          const auto &obj = *node->val_.o;
+          if (obj.empty()) {
+            os << "{}";
+            stateStack.pop();
+            break;
+          }
+          auto &it = stateStack.top().objIt;
+          if (it == obj.cbegin()) {
+            if (formatted)
+              os << "{\n" << std::setw(m_indent * stateStack.size()) << ' ';
+            else
+              os << '{';
+          } else if (it != obj.cend()) {
+            if (formatted)
+              os << ",\n" << std::setw(m_indent * stateStack.size()) << ' ';
+            else
+              os << ',';
+          }
+
+          if (it != obj.cend()) {
+            os << "\"";
+            toJsonString(os, it->first, m_ascii);
+            os << "\":";
+            const auto child = &(it->second);
+            ++it;
+            stateStack.emplace(child);
+          } else {
+            if (formatted)
+              os << '\n'
+                 << std::string(m_indent * (stateStack.size() - 1), ' ') << '}';
+            else
+              os << '}';
+            stateStack.pop();
+          }
+        } break;
+        default:
+          stateStack.pop();
+          break;
+        }
+      }
+
       os << std::setprecision(p);
+
       return *this;
+    }
+
+  private:
+    static void toJsonString(std::ostream &os, const JsonStr_t &src,
+                             bool ascii) {
+      for (auto ite = src.begin(); ite != src.end(); ++ite) {
+        switch (*ite) {
+        case '"':
+        case '\\':
+        case '/':
+          os << '\\' << *ite;
+          break;
+        case '\b':
+          os << "\\b";
+          break;
+        case '\f':
+          os << "\\f";
+          break;
+        case '\n':
+          os << "\\n";
+          break;
+        case '\r':
+          os << "\\r";
+          break;
+        case '\t':
+          os << "\\t";
+          break;
+        default: {
+          if (ascii && *ite & 0x80)
+            decodeUtf8(os, ite);
+          else
+            os << *ite;
+        } break;
+        }
+      }
+    }
+
+    static void decodeUtf8(std::ostream &os, std::string::const_iterator &ite) {
+      uint32_t u = 0;
+      if (!(*ite & 0x20)) {
+        u = ((*ite & 0x1F) << 6) | (*(ite + 1) & 0x3F);
+        ++ite;
+      } else if (!(*ite & 0x10)) {
+        u = ((*ite & 0xF) << 12) | ((*(ite + 1) & 0x3F) << 6) |
+            (*(ite + 2) & 0x3F);
+        ite += 2;
+      } else {
+        u = ((*ite & 0x7) << 18) | ((*(ite + 1) & 0x3F) << 12) |
+            ((*(ite + 2) & 0x3F) << 6) | (*(ite + 3) & 0x3F);
+        ite += 3;
+      }
+
+      if (u >= 0x10000) {
+        uint32_t l = 0xDC00 + (u & 0x3FF);
+        uint32_t u0 = ((u - 0x10000) >> 10) + 0xD800;
+        if (u0 <= 0xDBFF) {
+          toHex4(os, u0);
+          toHex4(os, l);
+        }
+      }
+      toHex4(os, u);
+    }
+
+    static void toHex4(std::ostream &os, uint32_t u) {
+      char h[4];
+      for (int i = 3; i >= 0; --i) {
+        h[i] = u & 0xF;
+        h[i] = h[i] < 10 ? (h[i] + '0') : (h[i] - 10 + 'a');
+        u >>= 4;
+      }
+      os << "\\u" << h[0] << h[1] << h[2] << h[3];
     }
 
   private:
@@ -917,196 +1060,6 @@ private:
 
 public:
   Serializer serializer() const { return Serializer(*this); }
-
-  void dump(std::ostream &os, size_t indent = static_cast<size_t>(-1),
-            bool ascii = true) const {
-
-    bool formatted = (indent != static_cast<size_t>(-1));
-
-    std::stack<ConstTraverseState> stateStack;
-    stateStack.emplace(this);
-
-    while (!stateStack.empty()) {
-      auto node = stateStack.top().node;
-      switch (node->ty_) {
-      case NullType_:
-        os << "null";
-        stateStack.pop();
-        break;
-      case BoolType_:
-        os << (node->val_.b ? "true" : "false");
-        stateStack.pop();
-        break;
-      case DoubleType_:
-        os << node->val_.d;
-        stateStack.pop();
-        break;
-      case IntType_:
-        os << node->val_.i;
-        stateStack.pop();
-        break;
-      case UintType_:
-        os << node->val_.u;
-        stateStack.pop();
-        break;
-      case StrType_:
-        os << "\"";
-        toJsonString(os, *(node->val_.s), ascii);
-        os << "\"";
-        stateStack.pop();
-        break;
-      case ArrType_: {
-        const auto &arr = *node->val_.a;
-        if (arr.empty()) {
-          os << "[]";
-          stateStack.pop();
-          break;
-        }
-        auto &it = stateStack.top().arrIt;
-        if (it == arr.cbegin()) {
-          if (formatted)
-            os << "[\n" << std::setw(indent * stateStack.size()) << ' ';
-          else
-            os << '[';
-        } else if (it != arr.cend()) {
-          if (formatted)
-            os << ",\n" << std::setw(indent * stateStack.size()) << ' ';
-          else
-            os << ',';
-        }
-        if (it != arr.cend()) {
-          const auto child = &(*it);
-          ++it;
-          stateStack.emplace(child);
-        } else {
-          if (formatted)
-            os << '\n'
-               << std::string(indent * (stateStack.size() - 1), ' ') << ']';
-          else
-            os << ']';
-          stateStack.pop();
-        }
-      } break;
-      case ObjType_: {
-        const auto &obj = *node->val_.o;
-        if (obj.empty()) {
-          os << "{}";
-          stateStack.pop();
-          break;
-        }
-        auto &it = stateStack.top().objIt;
-        if (it == obj.cbegin()) {
-          if (formatted)
-            os << "{\n" << std::setw(indent * stateStack.size()) << ' ';
-          else
-            os << '{';
-        } else if (it != obj.cend()) {
-          if (formatted)
-            os << ",\n" << std::setw(indent * stateStack.size()) << ' ';
-          else
-            os << ',';
-        }
-
-        if (it != obj.cend()) {
-          os << "\"";
-          toJsonString(os, it->first, ascii);
-          os << "\":";
-          const auto child = &(it->second);
-          ++it;
-          stateStack.emplace(child);
-        } else {
-          if (formatted)
-            os << '\n'
-               << std::string(indent * (stateStack.size() - 1), ' ') << '}';
-          else
-            os << '}';
-          stateStack.pop();
-        }
-      } break;
-      default:
-        stateStack.pop();
-        break;
-      }
-    }
-  }
-
-  std::string toString(size_t indent = static_cast<size_t>(-1),
-                       bool ascii = true) const {
-    std::stringstream ss;
-    ss << std::setprecision(16);
-    dump(ss, indent, ascii);
-    return ss.str();
-  }
-
-private:
-  static void toJsonString(std::ostream &os, const JsonStr_t &src, bool ascii) {
-    for (auto ite = src.begin(); ite != src.end(); ++ite) {
-      switch (*ite) {
-      case '"':
-      case '\\':
-      case '/':
-        os << '\\' << *ite;
-        break;
-      case '\b':
-        os << "\\b";
-        break;
-      case '\f':
-        os << "\\f";
-        break;
-      case '\n':
-        os << "\\n";
-        break;
-      case '\r':
-        os << "\\r";
-        break;
-      case '\t':
-        os << "\\t";
-        break;
-      default: {
-        if (ascii && *ite & 0x80)
-          decodeUtf8(os, ite);
-        else
-          os << *ite;
-      } break;
-      }
-    }
-  }
-
-  static void decodeUtf8(std::ostream &os, std::string::const_iterator &ite) {
-    uint32_t u = 0;
-    if (!(*ite & 0x20)) {
-      u = ((*ite & 0x1F) << 6) | (*(ite + 1) & 0x3F);
-      ++ite;
-    } else if (!(*ite & 0x10)) {
-      u = ((*ite & 0xF) << 12) | ((*(ite + 1) & 0x3F) << 6) |
-          (*(ite + 2) & 0x3F);
-      ite += 2;
-    } else {
-      u = ((*ite & 0x7) << 18) | ((*(ite + 1) & 0x3F) << 12) |
-          ((*(ite + 2) & 0x3F) << 6) | (*(ite + 3) & 0x3F);
-      ite += 3;
-    }
-
-    if (u >= 0x10000) {
-      uint32_t l = 0xDC00 + (u & 0x3FF);
-      uint32_t u0 = ((u - 0x10000) >> 10) + 0xD800;
-      if (u0 <= 0xDBFF) {
-        toHex4(os, u0);
-        toHex4(os, l);
-      }
-    }
-    toHex4(os, u);
-  }
-
-  static void toHex4(std::ostream &os, uint32_t u) {
-    char h[4];
-    for (int i = 3; i >= 0; --i) {
-      h[i] = u & 0xF;
-      h[i] = h[i] < 10 ? (h[i] + '0') : (h[i] - 10 + 'a');
-      u >>= 4;
-    }
-    os << "\\u" << h[0] << h[1] << h[2] << h[3];
-  }
 
 private:
   enum JsonInternalTypeId : size_t {
@@ -1195,7 +1148,7 @@ private:
 
   private:
     void fillBuf() {
-      m_is.read(m_buf.data(), BufSize);
+      m_is.read(m_buf, BufSize);
       m_bufPos = 0;
       if (m_is.eof())
         m_endPos = m_is.gcount();
@@ -1203,7 +1156,7 @@ private:
 
   private:
     std::istream &m_is;
-    std::array<char, BufSize> m_buf;
+    char m_buf[BufSize];
     size_t m_bufPos;
     size_t m_endPos;
   };
@@ -1766,6 +1719,21 @@ inline JsonNode parseJsonFile(std::string_view filename, bool checkEnd = true) {
 
 inline JsonNode parseJsonFile(std::ifstream &is, bool checkEnd = true) {
   return JsonParser{}.parse(is, checkEnd);
+}
+
+inline std::istream &operator>>(std::istream &is, JsonNode &node) {
+  node = JsonParser{}.parse(is, true);
+  return is;
+}
+
+inline std::ostream &operator<<(std::ostream &os, const JsonNode &node) {
+  node.serializer().dump(os);
+  return os;
+}
+
+inline std::ostream &operator<<(std::ostream &os, JsonNode::Serializer &s) {
+  s.dump(os);
+  return os;
 }
 
 #endif
