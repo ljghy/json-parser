@@ -868,7 +868,6 @@ public:
   get() const {
     requireType(ObjType_);
     auto &obj = *val_.o;
-    using KeyType = typename T::key_type;
     using MappedType = typename T::mapped_type;
     T ret{};
     for (const auto &p : obj) {
