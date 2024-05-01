@@ -14,6 +14,7 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 // #define JSON_ENABLE_EMPTY_NODE
@@ -246,6 +247,7 @@ private:
     }
   };
 
+  // Traits
 private:
   template <typename T> struct isSignedIntegral {
     static constexpr bool value =
@@ -258,6 +260,55 @@ private:
         std::is_integral<T>::value && std::is_unsigned<T>::value &&
         !std::is_same_v<T, char> && !std::is_same_v<T, bool>;
   };
+
+  template <typename T, typename = void>
+  struct has_subscript_op : std::false_type {};
+  template <typename T>
+  struct has_subscript_op<T,
+                          std::void_t<decltype(std::declval<T &>()[size_t{}])>>
+      : std::true_type {};
+  template <typename T>
+  static constexpr bool has_subscript_op_v = has_subscript_op<T>::value;
+
+  template <typename T>
+  using resize_op_t = decltype(std::declval<T>().resize(size_t{}));
+  template <typename T, typename = void>
+  struct has_resize_op : std::false_type {};
+  template <typename T>
+  struct has_resize_op<T, std::void_t<resize_op_t<T>>> : std::true_type {};
+  template <typename T>
+  static constexpr bool has_resize_op_v = has_resize_op<T>::value;
+
+  template <typename T, typename = void> struct get_value_type {
+    using type = std::remove_reference_t<decltype(std::declval<T &>()[0])>;
+  };
+  template <typename T>
+  struct get_value_type<T, std::void_t<typename T::value_type>> {
+    using type = typename T::value_type;
+  };
+  template <typename T>
+  using get_value_type_t = typename get_value_type<T>::type;
+
+  template <typename T>
+  static constexpr bool is_unresizable_sequence_container_v =
+      has_subscript_op_v<T> && !has_resize_op_v<T> && !std::is_pointer_v<T>;
+
+  template <typename T>
+  static constexpr bool is_resizable_sequence_container_v =
+      has_subscript_op_v<T> &&has_resize_op_v<T> && !std::is_pointer_v<T>;
+
+  template <typename T, typename = void>
+  struct is_associative_container : std::false_type {};
+  template <typename T>
+  struct is_associative_container<
+      T, std::void_t<typename T::key_type, typename T::mapped_type,
+                     decltype(std::declval<T &>().emplace(
+                         std::declval<typename T::key_type>(),
+                         std::declval<typename T::mapped_type>()))>>
+      : std::true_type {};
+  template <typename T>
+  static constexpr bool is_associative_container_v =
+      is_associative_container<T>::value;
 
   // Constructors
 public:
@@ -775,43 +826,13 @@ public:
 #endif
   }
 
-  template <typename Container>
-  using subscriptOp_t = decltype(std::declval<Container>()[size_t{}]);
-  template <typename Container, typename = void>
-  struct hasSubscriptOp : std::false_type {};
-  template <typename Container>
-  struct hasSubscriptOp<Container, std::void_t<subscriptOp_t<Container>>>
-      : std::true_type {};
-  template <typename Container>
-  static constexpr bool hasSubscriptOp_v = hasSubscriptOp<Container>::value;
-
-  template <typename Container>
-  using resizeOp_t = decltype(std::declval<Container>().resize(size_t{}));
-  template <typename Container, typename = void>
-  struct hasResizeOp : std::false_type {};
-  template <typename Container>
-  struct hasResizeOp<Container, std::void_t<resizeOp_t<Container>>>
-      : std::true_type {};
-  template <typename Container>
-  static constexpr bool hasResizeOp_v = hasResizeOp<Container>::value;
-
-  template <typename T, typename = void> struct getValueType {
-    using type = std::remove_reference_t<decltype(std::declval<T>()[0])>;
-  };
   template <typename T>
-  struct getValueType<T, std::void_t<typename T::value_type>> {
-    using type = typename T::value_type;
-  };
-  template <typename T> using getValueType_t = typename getValueType<T>::type;
-
-  template <typename T>
-  typename std::enable_if_t<
-      hasSubscriptOp_v<T> && !std::is_pointer_v<T> && !hasResizeOp_v<T>, T>
+  typename std::enable_if_t<is_unresizable_sequence_container_v<T>, T>
   get(const size_t n = static_cast<size_t>(-1), size_t offset = 0,
       const size_t stride = 1) const {
     requireType(ArrType_);
     auto &arr = *val_.a;
-    using ValueType = getValueType_t<T>;
+    using ValueType = get_value_type_t<T>;
     T ret{};
     for (size_t i = 0; offset < arr.size() && i < n; offset += stride, ++i) {
       ret[i] = arr[offset].get<ValueType>();
@@ -820,17 +841,33 @@ public:
   }
 
   template <typename T>
-  typename std::enable_if_t<
-      hasSubscriptOp_v<T> && !std::is_pointer_v<T> && hasResizeOp_v<T>, T>
+  typename std::enable_if_t<is_resizable_sequence_container_v<T>, T>
   get(const size_t n = static_cast<size_t>(-1), size_t offset = 0,
       const size_t stride = 1) const {
     requireType(ArrType_);
     auto &arr = *val_.a;
-    using ValueType = getValueType_t<T>;
+    using ValueType = get_value_type_t<T>;
     T ret{};
     ret.resize(n == static_cast<size_t>(-1) ? arr.size() : n);
     for (size_t i = 0; offset < arr.size() && i < n; offset += stride, ++i) {
       ret[i] = arr[offset].get<ValueType>();
+    }
+    return ret;
+  }
+
+  template <typename T>
+  typename std::enable_if_t<
+      is_associative_container_v<T> &&
+          std::is_convertible_v<std::string, typename T::key_type>,
+      T>
+  get() const {
+    requireType(ObjType_);
+    auto &obj = *val_.o;
+    using KeyType = typename T::key_type;
+    using MappedType = typename T::mapped_type;
+    T ret{};
+    for (const auto &p : obj) {
+      ret.emplace(p.first, p.second.get<MappedType>());
     }
     return ret;
   }
