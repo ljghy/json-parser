@@ -1086,7 +1086,6 @@ public:
         switch (*ite) {
         case '"':
         case '\\':
-        case '/':
           os << '\\' << *ite;
           break;
         case '\b':

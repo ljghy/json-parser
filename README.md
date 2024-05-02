@@ -86,3 +86,55 @@ int main() {
   std::cout << json7.serializer().indent(2) << std::endl;
 }
 ```
+
+```c++
+#include "JsonParser.hpp"
+#include <Eigen/Core>
+#include <glm/glm.hpp>
+#include <iostream>
+#include <unordered_map>
+
+int main() {
+  try {
+    auto jvec = parseJsonString("[1.2, 2.3, 3.4, 4.5]");
+    auto jmat =
+        parseJsonString("[[1.2, 2.3, 3.4], [4.5, 5.6, 6.7], [7.8, 8.9, 9.0]]");
+
+    Eigen::VectorXd vec_eigen = jvec.get<Eigen::VectorXd>();
+    glm::vec4 vec_glm = jvec.get<glm::vec4>();
+    auto mat = jmat.get<std::vector<std::array<double, 3>>>();
+
+    std::cout << "Eigen Vector: " << vec_eigen.transpose() << std::endl;
+    std::cout << "GLM Vector: " << vec_glm.x << ", " << vec_glm.y << ", "
+              << vec_glm.z << ", " << vec_glm.w << std::endl;
+
+    for (const auto &row : mat) {
+      for (const auto &elem : row) {
+        std::cout << elem << " ";
+      }
+      std::cout << std::endl;
+    }
+
+    JsonNode jvec2 = vec_eigen;
+    JsonNode jmat2 = mat;
+
+    std::cout << jvec2 << std::endl;
+    std::cout << jmat2 << std::endl;
+
+    JsonNode jmap{
+        {"one"_key, {1, 1}}, {"two"_key, {2, 2}}, {"three"_key, {3, 3}}};
+
+    auto map = jmap.get<std::unordered_map<std::string, glm::vec2>>();
+    for (const auto &p : map) {
+      std::cout << p.first << ": " << p.second[0] << ", " << p.second[1]
+                << std::endl;
+    }
+
+    JsonNode jmap2 = map;
+    std::cout << jmap2 << std::endl;
+
+  } catch (const std::exception &e) {
+    std::cerr << e.what() << std::endl;
+  }
+}
+```
