@@ -65,14 +65,9 @@ public:
 
   void clear();
 
-  JsonNode &operator=(const JsonNode &);
-  JsonNode &operator=(JsonNode &&) noexcept;
-  JsonNode &operator=(JsonNull_t);
-  JsonNode &operator=(bool);
-  template <typename NumberLike> JsonNode &operator=(NumberLike);
-  JsonNode &operator=(std::nullptr_t);
-  JsonNode &operator=(char);
-  JsonNode &operator=(const char *);
+  void swap(JsonNode &) noexcept;
+
+  JsonNode &operator=(JsonNode);
 
   JsonStr_t &str();
   const JsonStr_t &str() const;
@@ -574,119 +569,13 @@ public:
 
   // Assignment operators
 public:
-  JsonNode &operator=(const JsonNode &other) {
-    if (this == &other)
-      return *this;
-
-    switch (other.ty_) {
-    case ArrType_: {
-      auto otherArr = *other.val_.a;
-      if (ty_ == ArrType_)
-        val_.a->swap(otherArr);
-      else {
-        *this = std::move(otherArr);
-      }
-    } break;
-    case ObjType_: {
-      auto otherObj = *other.val_.o;
-      if (ty_ == ObjType_)
-        *val_.o = std::move(otherObj);
-      else {
-        *this = std::move(otherObj);
-      }
-    } break;
-    case StrType_: {
-      auto otherStr = *other.val_.s;
-      if (ty_ == StrType_)
-        *val_.s = std::move(otherStr);
-      else {
-        *this = std::move(otherStr);
-      }
-    } break;
-    case DoubleType_:
-    case IntType_:
-    case UintType_:
-    case BoolType_:
-      val_ = other.val_;
-      break;
-    default:
-      break;
-    }
-    ty_ = other.ty_;
-    return *this;
+  void swap(JsonNode &other) noexcept {
+    std::swap(ty_, other.ty_);
+    std::swap(val_, other.val_);
   }
 
-  JsonNode &operator=(JsonNode &&other) noexcept {
-    if (this == &other)
-      return *this;
-    clear();
-    ty_ = other.ty_;
-    val_ = other.val_;
-    other.ty_ = {};
-    return *this;
-  }
-
-  JsonNode &operator=(JsonNull_t) {
-    clear();
-    ty_ = NullType_;
-    return *this;
-  }
-
-  JsonNode &operator=(bool b) {
-    clear();
-    ty_ = BoolType_;
-    val_.b = b;
-    return *this;
-  }
-
-  template <typename T>
-  typename std::enable_if_t<std::is_floating_point_v<T>, JsonNode &>
-  operator=(T value) {
-    clear();
-    ty_ = DoubleType_;
-    val_.d = static_cast<double>(value);
-    return *this;
-  }
-
-  template <typename T>
-  typename std::enable_if_t<is_signed_integral_v<T>, JsonNode &>
-  operator=(T value) {
-    clear();
-    ty_ = IntType_;
-    val_.i = static_cast<int64_t>(value);
-    return *this;
-  }
-
-  template <typename T>
-  typename std::enable_if_t<is_unsigned_integral_v<T>, JsonNode &>
-  operator=(T value) {
-    clear();
-    ty_ = UintType_;
-    val_.u = static_cast<uint64_t>(value);
-    return *this;
-  }
-
-  JsonNode &operator=(std::nullptr_t) {
-    clear();
-    ty_ = NullType_;
-    return *this;
-  }
-
-  JsonNode &operator=(char c) {
-    if (ty_ == StrType_)
-      *val_.s = c;
-    else {
-      *this = JsonStr_t(1, c);
-    }
-    return *this;
-  }
-
-  JsonNode &operator=(const char *str) {
-    if (ty_ == StrType_)
-      *val_.s = str;
-    else {
-      *this = JsonStr_t(str);
-    }
+  JsonNode &operator=(JsonNode other) {
+    swap(other);
     return *this;
   }
 
