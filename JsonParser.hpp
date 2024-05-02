@@ -293,6 +293,22 @@ private:
   template <typename T>
   using get_value_type_t = typename get_value_type<T>::type;
 
+  template <typename T, typename = void>
+  struct has_size_op : std::false_type {};
+  template <typename T>
+  struct has_size_op<T, std::void_t<decltype(std::declval<T>().size())>>
+      : std::true_type {};
+  template <typename T>
+  static constexpr bool has_size_op_v = has_size_op<T>::value;
+
+  template <typename T, typename = void>
+  struct has_length_op : std::false_type {};
+  template <typename T>
+  struct has_length_op<T, std::void_t<decltype(std::declval<T>().length())>>
+      : std::true_type {};
+  template <typename T>
+  static constexpr bool has_static_length_op_v = has_length_op<T>::value;
+
   template <typename T>
   static constexpr bool is_unresizable_sequence_container_v =
       has_subscript_op_v<T> && !has_resize_op_v<T> && !std::is_pointer_v<T>;
@@ -378,6 +394,47 @@ public:
     val_.o = new JsonObj_t{};
     for (const auto &p : obj) {
       val_.o->emplace(p.first.key, p.second);
+    }
+  }
+
+  template <typename T, typename std::enable_if_t<
+                            has_subscript_op_v<T> &&
+                                (has_size_op_v<T> || has_static_length_op_v<T>),
+                            int> = 0>
+  JsonNode(const T &a, const size_t n = static_cast<size_t>(-1),
+           size_t offset = 0, const size_t stride = 1) {
+    ty_ = ArrType_;
+    size_t sz{};
+    if constexpr (has_size_op_v<T>)
+      sz = a.size();
+    else
+      sz = a.length();
+    val_.a = new JsonArr_t(n == static_cast<size_t>(-1) ? sz : n);
+    for (size_t i = 0; offset < sz && i < n; offset += stride, ++i) {
+      (*val_.a)[i] = a[offset];
+    }
+  }
+
+  template <typename T, typename std::enable_if_t<
+                            has_subscript_op_v<T> && !has_size_op_v<T> &&
+                                !has_static_length_op_v<T>,
+                            int> = 0>
+  JsonNode(const T &a, const size_t n, size_t offset = 0,
+           const size_t stride = 1) {
+    ty_ = ArrType_;
+    val_.a = new JsonArr_t(n);
+    for (size_t i = 0; i < n; offset += stride, ++i) {
+      (*val_.a)[i] = a[offset];
+    }
+  }
+
+  template <typename T,
+            typename std::enable_if_t<is_associative_container_v<T>, int> = 0>
+  JsonNode(const T &m) {
+    ty_ = ObjType_;
+    val_.o = new JsonObj_t{};
+    for (const auto &p : m) {
+      val_.o->emplace(p.first, p.second);
     }
   }
 
