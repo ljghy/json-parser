@@ -115,7 +115,8 @@ public:
   template <> auto get<ArrayLike>(const size_t n = -1, size_t offset = 0, const size_t stride = 1) const;
   template <> auto get<MapLike>() const;
 
-  template <typename T> auto get(const std::string &) const;
+  template <typename T> auto get(const std::string &key) const;
+  template <typename T> auto get(const std::string &key, T &&fallback) const;
 
   class Serializer {
   public:
@@ -822,7 +823,16 @@ public:
   }
 
   template <typename T> auto get(const std::string &key) const {
-    return (*this)[key].template get<T>();
+    requireType(ObjType_);
+    return val_.o->at(key).get<T>();
+  }
+
+  template <typename T> auto get(const std::string &key, T &&fallback) const {
+    requireType(ObjType_);
+    auto it = val_.o->find(key);
+    if (it != val_.o->end())
+      return it->second.get<T>();
+    return std::forward<T>(fallback);
   }
 
   // serialization
