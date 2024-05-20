@@ -124,6 +124,7 @@ public:
     Serializer &indent(size_t);
     Serializer &ascii(bool);
     Serializer &dump(std::ostream &);
+    std::string dumps();
   };
 
   Serializer serializer() const;
@@ -976,6 +977,12 @@ public:
       os << std::setprecision(p);
 
       return *this;
+    }
+
+    std::string dumps() {
+      std::ostringstream oss;
+      dump(oss);
+      return oss.str();
     }
 
   private:
