@@ -11,6 +11,7 @@
 #include <iomanip>
 #include <locale>
 #include <map>
+#include <sstream>
 #include <stack>
 #include <stdexcept>
 #include <string>
