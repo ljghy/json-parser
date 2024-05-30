@@ -9,6 +9,7 @@
 #include <fstream>
 #include <initializer_list>
 #include <iomanip>
+#include <locale>
 #include <map>
 #include <stack>
 #include <stdexcept>
@@ -870,8 +871,10 @@ public:
     }
 
     Serializer &dump(std::ostream &os) {
-      size_t p = os.precision();
+      size_t prec = os.precision();
       os.precision(m_precision);
+      auto loc = os.getloc();
+      os.imbue(std::locale::classic());
 
       bool formatted = (m_indent != static_cast<size_t>(-1));
 
@@ -981,7 +984,8 @@ public:
         }
       }
 
-      os << std::setprecision(p);
+      os << std::setprecision(prec);
+      os.imbue(loc);
 
       return *this;
     }
