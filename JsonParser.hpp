@@ -1709,8 +1709,8 @@ inline void JsonParser::parseNumber(JsonInputStreamBase<Derived> &is,
   case NumType::INT: {
     int64_t num{};
     for (size_t i = 1; i < numStr.size(); ++i)
-      num = num * 10 + (numStr[i] - '0');
-    *node = -num;
+      num = num * 10 - (numStr[i] - '0');
+    *node = num;
   } break;
   case NumType::UINT: {
     uint64_t num{};
