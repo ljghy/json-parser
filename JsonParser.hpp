@@ -1369,12 +1369,12 @@ inline JsonNode JsonParser::streamParse(JsonInputStreamBase<Derived> &is,
   m_nodeStack.push(&ret);
 
   if (isComplete != nullptr)
-    *isComplete = true;
+    *isComplete = false;
   try {
     parseLoop(is);
   } catch (const std::exception &) {
     if (isComplete != nullptr)
-      *isComplete = false;
+      *isComplete = true;
   }
 
   return ret;
