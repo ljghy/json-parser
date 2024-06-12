@@ -1301,7 +1301,8 @@ inline void JsonParser::parseLoop(JsonInputStreamBase<Derived> &is) {
       break;
     case '"':
       is.next();
-      *node = parseString(is);
+      *node = JsonStr_t{};
+      *node->val_.s = parseString(is);
       popStack();
       break;
     case '[':
@@ -1629,13 +1630,14 @@ JsonParser::parseKeyWithColon(JsonInputStreamBase<Derived> &is) {
 
 template <typename Derived>
 inline void JsonParser::beginArray(JsonInputStreamBase<Derived> &is) {
+  auto *node = m_nodeStack.top();
+  *node = JsonArr_t{};
+
   skipSpace(is);
   if (is.eoi())
     throw std::runtime_error(
         getJsonErrorMsg(detail::JsonErrorCode::UnexpectedEndOfInput));
 
-  auto *node = m_nodeStack.top();
-  *node = JsonArr_t{};
   if (is.ch() == ']') {
     is.next();
     popStack();
@@ -1646,13 +1648,14 @@ inline void JsonParser::beginArray(JsonInputStreamBase<Derived> &is) {
 
 template <typename Derived>
 inline void JsonParser::beginObject(JsonInputStreamBase<Derived> &is) {
+  auto *node = m_nodeStack.top();
+  *node = JsonObj_t{};
+
   skipSpace(is);
   if (is.eoi())
     throw std::runtime_error(
         getJsonErrorMsg(detail::JsonErrorCode::UnexpectedEndOfInput));
 
-  auto *node = m_nodeStack.top();
-  *node = JsonObj_t{};
   if (is.ch() == '}') {
     is.next();
     popStack();
