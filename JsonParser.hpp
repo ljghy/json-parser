@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <initializer_list>
@@ -141,11 +142,27 @@ public:
   JsonNode parse(std::string_view, size_t *offset = nullptr);
   JsonNode parse(std::ifstream &, bool checkEnd = true);
   JsonNode parse(std::istream &, bool checkEnd = true);
+  JsonNode streamParse(std::string_view, size_t *offset = nullptr, bool *isComplete = nullptr);
+  JsonNode streamParse(std::ifstream &, bool *isComplete = nullptr);
+  JsonNode streamParse(std::istream &, bool *isComplete = nullptr);
+
+  template <typename Derived> class JsonInputStreamBase {
+  public:
+    char ch() const;
+    void next();
+    char get();
+    bool eoi() const;
+  };
 };
 
 JsonNode parseJsonString(std::string_view inputView, size_t *offset = nullptr);
-JsonNode parseJsonFile(std::string_view filename, bool checkEnd = true);
+JsonNode parseJsonFile(const std::filesystem::path &filename, bool checkEnd = true);
 JsonNode parseJsonFile(std::istream &is, bool checkEnd = true);
+
+JsonNode parseStreamJsonString(std::string_view inputView, size_t *offset = nullptr, bool *isComplete = nullptr);
+JsonNode parseStreamJsonFile(const std::filesystem::path &filename, bool *isComplete = nullptr);
+JsonNode parseStreamJsonFile(std::istream &is, bool *isComplete = nullptr);
+
 std::istream &operator>>(std::istream &, JsonNode &);
 std::ostream &operator<<(std::ostream &, const JsonNode &);
 std::ostream &operator<<(std::ostream &, JsonNode::Serializer &);
@@ -1114,7 +1131,12 @@ public:
   JsonNode parse(std::ifstream &, bool checkEnd = true);
   JsonNode parse(std::istream &, bool checkEnd = true);
 
-private:
+  JsonNode streamParse(std::string_view, size_t *offset = nullptr,
+                       bool *isComplete = nullptr);
+  JsonNode streamParse(std::ifstream &, bool *isComplete = nullptr);
+  JsonNode streamParse(std::istream &, bool *isComplete = nullptr);
+
+public:
   template <typename Derived> class JsonInputStreamBase {
   public:
     char ch() const {
@@ -1127,6 +1149,7 @@ private:
     } // end of input
   };
 
+private:
   template <size_t BufSize>
   class JsonFileInputStream
       : public JsonInputStreamBase<JsonFileInputStream<BufSize>> {
@@ -1194,8 +1217,13 @@ private:
   };
 
 private:
+  template <typename Derived> void parseLoop(JsonInputStreamBase<Derived> &);
+
   template <typename Derived>
   JsonNode parse(JsonInputStreamBase<Derived> &, bool checkEnd);
+
+  template <typename Derived>
+  JsonNode streamParse(JsonInputStreamBase<Derived> &, bool *isComplete);
 
   template <typename Derived> void skipSpace(JsonInputStreamBase<Derived> &);
 
@@ -1255,14 +1283,7 @@ private:
 };
 
 template <typename Derived>
-inline JsonNode JsonParser::parse(JsonInputStreamBase<Derived> &is,
-                                  bool checkEnd) {
-  m_nodeStack = {};
-
-  JsonNode ret;
-
-  m_nodeStack.push(&ret);
-
+inline void JsonParser::parseLoop(JsonInputStreamBase<Derived> &is) {
   while (!m_nodeStack.empty()) {
     skipSpace(is);
     if (is.eoi())
@@ -1319,11 +1340,42 @@ inline JsonNode JsonParser::parse(JsonInputStreamBase<Derived> &is,
       }
     }
   }
+}
+
+template <typename Derived>
+inline JsonNode JsonParser::parse(JsonInputStreamBase<Derived> &is,
+                                  bool checkEnd) {
+  JsonNode ret;
+
+  m_nodeStack = {};
+  m_nodeStack.push(&ret);
+
+  parseLoop(is);
 
   skipSpace(is);
   if (checkEnd && !is.eoi())
     throw std::runtime_error(
         getJsonErrorMsg(detail::JsonErrorCode::InvalidJson));
+
+  return ret;
+}
+
+template <typename Derived>
+inline JsonNode JsonParser::streamParse(JsonInputStreamBase<Derived> &is,
+                                        bool *isComplete) {
+  JsonNode ret;
+
+  m_nodeStack = {};
+  m_nodeStack.push(&ret);
+
+  if (isComplete != nullptr)
+    *isComplete = true;
+  try {
+    parseLoop(is);
+  } catch (const std::exception &) {
+    if (isComplete != nullptr)
+      *isComplete = false;
+  }
 
   return ret;
 }
@@ -1345,6 +1397,26 @@ inline JsonNode JsonParser::parse(std::ifstream &is, bool checkEnd) {
 inline JsonNode JsonParser::parse(std::istream &is, bool checkEnd) {
   auto fileInputStream = JsonFileInputStream<1>(is);
   return parse(fileInputStream, checkEnd);
+}
+
+inline JsonNode JsonParser::streamParse(std::string_view inputView,
+                                        size_t *offset, bool *isComplete) {
+  auto stringViewInputStream =
+      JsonStringViewInputStream(inputView, offset == nullptr ? 0 : *offset);
+  auto ret = streamParse(stringViewInputStream, isComplete);
+  if (offset != nullptr)
+    *offset = stringViewInputStream.pos();
+  return ret;
+}
+
+inline JsonNode JsonParser::streamParse(std::ifstream &is, bool *isComplete) {
+  auto fileInputStream = JsonFileInputStream<64>(is);
+  return streamParse(fileInputStream, isComplete);
+}
+
+inline JsonNode JsonParser::streamParse(std::istream &is, bool *isComplete) {
+  auto fileInputStream = JsonFileInputStream<1>(is);
+  return streamParse(fileInputStream, isComplete);
 }
 
 template <typename Derived>
@@ -1725,13 +1797,31 @@ inline JsonNode parseJsonString(std::string_view inputView,
   return JsonParser{}.parse(inputView, offset);
 }
 
-inline JsonNode parseJsonFile(std::string_view filename, bool checkEnd = true) {
-  std::ifstream ifs(filename.data());
+inline JsonNode parseJsonFile(const std::filesystem::path &filename,
+                              bool checkEnd = true) {
+  std::ifstream ifs(filename);
   return JsonParser{}.parse(ifs, checkEnd);
 }
 
 inline JsonNode parseJsonFile(std::ifstream &is, bool checkEnd = true) {
   return JsonParser{}.parse(is, checkEnd);
+}
+
+inline JsonNode parseStreamJsonString(std::string_view inputView,
+                                      size_t *offset = nullptr,
+                                      bool *isComplete = nullptr) {
+  return JsonParser{}.streamParse(inputView, offset, isComplete);
+}
+
+inline JsonNode parseStreamJsonFile(const std::filesystem::path &filename,
+                                    bool *isComplete = nullptr) {
+  std::ifstream ifs(filename);
+  return JsonParser{}.streamParse(ifs, isComplete);
+}
+
+inline JsonNode parseStreamJsonFile(std::ifstream &is,
+                                    bool *isComplete = nullptr) {
+  return JsonParser{}.streamParse(is, isComplete);
 }
 
 inline std::istream &operator>>(std::istream &is, JsonNode &node) {
