@@ -153,6 +153,13 @@ public:
     char get();
     bool eoi() const;
   };
+
+  template <typename Derived>
+  JsonNode parse(JsonInputStreamBase<Derived> &, bool checkEnd = true);
+
+  template <typename Derived>
+  JsonNode streamParse(JsonInputStreamBase<Derived> &, bool *isComplete = nullptr);
+
 };
 
 JsonNode parseJsonString(std::string_view inputView, size_t *offset = nullptr);
@@ -1136,7 +1143,6 @@ public:
   JsonNode streamParse(std::ifstream &, bool *isComplete = nullptr);
   JsonNode streamParse(std::istream &, bool *isComplete = nullptr);
 
-public:
   template <typename Derived> class JsonInputStreamBase {
   public:
     char ch() const {
@@ -1148,6 +1154,13 @@ public:
       return (static_cast<const Derived *>(this))->eoi();
     } // end of input
   };
+
+  template <typename Derived>
+  JsonNode parse(JsonInputStreamBase<Derived> &, bool checkEnd = true);
+
+  template <typename Derived>
+  JsonNode streamParse(JsonInputStreamBase<Derived> &,
+                       bool *isComplete = nullptr);
 
 private:
   template <size_t BufSize>
@@ -1218,12 +1231,6 @@ private:
 
 private:
   template <typename Derived> void parseLoop(JsonInputStreamBase<Derived> &);
-
-  template <typename Derived>
-  JsonNode parse(JsonInputStreamBase<Derived> &, bool checkEnd);
-
-  template <typename Derived>
-  JsonNode streamParse(JsonInputStreamBase<Derived> &, bool *isComplete);
 
   template <typename Derived> void skipSpace(JsonInputStreamBase<Derived> &);
 
