@@ -10,6 +10,7 @@
 #include <fstream>
 #include <initializer_list>
 #include <iomanip>
+#include <limits>
 #include <locale>
 #include <map>
 #include <sstream>
@@ -20,6 +21,16 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
+
+#ifdef __cpp_lib_format
+#define JSON_PARSER_USE_FORMAT 1
+#else
+#define JSON_PARSER_USE_FORMAT 0
+#endif
+
+#if JSON_PARSER_USE_FORMAT
+#include <format>
+#endif
 
 // #define JSON_ENABLE_EMPTY_NODE
 // If JSON_ENABLE_EMPTY_NODE is defined, JsonNode can be empty to distinguish
@@ -341,7 +352,8 @@ private:
 
   template <typename T>
   static constexpr bool is_resizable_sequence_container_v =
-      has_subscript_op_v<T> && has_resize_op_v<T> && !std::is_pointer_v<T>;
+      has_subscript_op_v<T> && has_resize_op_v<T> && !std::is_pointer_v<T> &&
+      !std::is_same_v<T, std::string>;
 
   template <typename T, typename = void>
   struct is_associative_container : std::false_type {};
@@ -855,6 +867,36 @@ public:
     return ret;
   }
 
+  template <typename T>
+  typename std::enable_if_t<std::is_same_v<std::string, T>, T> get() const {
+    switch (ty_) {
+    case NullType_:
+      return "null";
+    case BoolType_:
+      return val_.b ? "true" : "false";
+    case DoubleType_:
+#if JSON_PARSER_USE_FORMAT
+      return std::format("{}", val_.d);
+#else
+    {
+      std::stringstream ss;
+      ss.precision(std::numeric_limits<double>::max_digits10);
+      ss << val_.d;
+      return ss.str();
+    }
+#endif
+    case IntType_:
+      return std::to_string(val_.i);
+    case UintType_:
+      return std::to_string(val_.u);
+    case StrType_:
+      return *val_.s;
+    default:
+      throw std::runtime_error(
+          getJsonErrorMsg(detail::JsonErrorCode::InvalidJsonAccess));
+    }
+  }
+
   template <typename T> auto get(const std::string &key) const {
     requireType(ObjType_);
     return val_.o->at(key).get<T>();
@@ -895,12 +937,23 @@ public:
     }
 
     Serializer &dump(std::ostream &os) {
+#if !JSON_PARSER_USE_FORMAT
       size_t prec = os.precision();
-      os.precision(m_precision);
+      os.precision(m_precision == static_cast<size_t>(-1)
+                       ? std::numeric_limits<double>::max_digits10
+                       : m_precision);
+#endif
       auto loc = os.getloc();
       os.imbue(std::locale::classic());
       char fill = os.fill();
       os.fill(' ');
+
+#if JSON_PARSER_USE_FORMAT
+      const std::string floatingPointFormatString =
+          m_precision == static_cast<size_t>(-1)
+              ? "{}"
+              : "{:." + std::to_string(m_precision) + "}";
+#endif
 
       bool formatted = (m_indent != static_cast<size_t>(-1));
       const char *colon = formatted ? ": " : ":";
@@ -920,7 +973,12 @@ public:
           stateStack.pop();
           break;
         case DoubleType_:
+#if JSON_PARSER_USE_FORMAT
+          os << std::vformat(std::locale::classic(), floatingPointFormatString,
+                             std::make_format_args(node->val_.d));
+#else
           os << node->val_.d;
+#endif
           stateStack.pop();
           break;
         case IntType_:
@@ -1010,8 +1068,9 @@ public:
           break;
         }
       }
-
+#if !JSON_PARSER_USE_FORMAT
       os << std::setprecision(prec);
+#endif
       os.imbue(loc);
       os.fill(fill);
 
@@ -1096,7 +1155,7 @@ public:
 
   private:
     const JsonNode &m_node;
-    size_t m_precision = 16;
+    size_t m_precision = static_cast<size_t>(-1);
     size_t m_indent = static_cast<size_t>(-1);
     bool m_ascii = true;
   };
