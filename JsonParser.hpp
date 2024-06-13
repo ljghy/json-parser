@@ -899,8 +899,11 @@ public:
       os.precision(m_precision);
       auto loc = os.getloc();
       os.imbue(std::locale::classic());
+      char fill = os.fill();
+      os.fill(' ');
 
       bool formatted = (m_indent != static_cast<size_t>(-1));
+      const char *colon = formatted ? ": " : ":";
 
       std::stack<ConstTraverseState> stateStack;
       stateStack.emplace(&m_node);
@@ -987,9 +990,9 @@ public:
           }
 
           if (it != obj.cend()) {
-            os << "\"";
+            os << '"';
             toJsonString(os, it->first, m_ascii);
-            os << "\":";
+            os << '"' << colon;
             const auto child = &(it->second);
             ++it;
             stateStack.emplace(child);
@@ -1010,6 +1013,7 @@ public:
 
       os << std::setprecision(prec);
       os.imbue(loc);
+      os.fill(fill);
 
       return *this;
     }
