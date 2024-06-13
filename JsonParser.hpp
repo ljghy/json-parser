@@ -32,12 +32,6 @@
 #include <format>
 #endif
 
-// #define JSON_ENABLE_EMPTY_NODE
-// If JSON_ENABLE_EMPTY_NODE is defined, JsonNode can be empty to distinguish
-// from null. Otherwise, JsonNode is null by default.
-// Note that empty values are not valid json values and need to be cleared
-// manually before calling size() in order to get correct results.
-
 /*
 clang-format off
 
@@ -115,9 +109,6 @@ public:
   JsonType type() const;
   std::string typeStr() const;
 
-#ifdef JSON_ENABLE_EMPTY_NODE
-  bool isEmpty() const;
-#endif
   bool isNull() const;
   bool isBool() const;
   bool isNum() const;
@@ -206,12 +197,7 @@ inline JsonKeyLiteral_t operator""_key(const char *key, size_t len) {
 }
 
 enum class JsonType : uint8_t {
-#ifdef JSON_ENABLE_EMPTY_NODE
-  Empty = 0,
-  Null,
-#else
   Null = 0,
-#endif
   Bool,
   Num,
   Str,
@@ -546,10 +532,6 @@ public:
   // Destructor
 public:
   ~JsonNode() {
-#ifdef JSON_ENABLE_EMPTY_NODE
-    if (isEmpty())
-      return;
-#endif
     std::stack<TraverseState> stateStack;
     stateStack.emplace(this);
     while (!stateStack.empty()) {
@@ -750,27 +732,17 @@ public:
   // Type and getter
 public:
   JsonType type() const {
-    constexpr JsonType types[]{
-#ifdef JSON_ENABLE_EMPTY_NODE
-        JsonType::Empty,
-#endif
-        JsonType::Null,  JsonType::Bool, JsonType::Num, JsonType::Num,
-        JsonType::Num,   JsonType::Str,  JsonType::Arr, JsonType::Obj};
+    constexpr JsonType types[]{JsonType::Null, JsonType::Bool, JsonType::Num,
+                               JsonType::Num,  JsonType::Num,  JsonType::Str,
+                               JsonType::Arr,  JsonType::Obj};
 
     return types[ty_];
   }
   std::string typeStr() const {
-    constexpr const char *types[]{
-#ifdef JSON_ENABLE_EMPTY_NODE
-        "empty",
-#endif
-        "null",  "bool", "num", "num", "num", "str", "arr", "obj"};
+    constexpr const char *types[]{"null", "bool", "num", "num",
+                                  "num",  "str",  "arr", "obj"};
     return types[ty_];
   }
-
-#ifdef JSON_ENABLE_EMPTY_NODE
-  bool isEmpty() const { return type() == JsonType::Empty; }
-#endif
 
   bool isNull() const { return type() == JsonType::Null; }
   bool isBool() const { return type() == JsonType::Bool; }
@@ -1165,12 +1137,7 @@ public:
 
 private:
   enum JsonInternalTypeId : size_t {
-#ifdef JSON_ENABLE_EMPTY_NODE
-    EmptyType_ = 0,
-    NullType_,
-#else
     NullType_ = 0,
-#endif
     BoolType_,
     DoubleType_,
     IntType_,
