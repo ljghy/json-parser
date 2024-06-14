@@ -532,6 +532,9 @@ public:
   // Destructor
 public:
   ~JsonNode() {
+    if (!isInternalPtr())
+      return;
+
     std::stack<TraverseState> stateStack;
     stateStack.emplace(this);
     while (!stateStack.empty()) {
@@ -541,9 +544,11 @@ public:
         auto &arr = node->val_.a;
         auto &it = stateStack.top().arrIt;
         if (it != arr->cend()) {
-          const auto child = &(*it);
+          if (it->isInternalPtr()) {
+            const auto child = &(*it);
+            stateStack.emplace(child);
+          }
           ++it;
-          stateStack.emplace(child);
         } else {
           delete arr;
           node->ty_ = {};
@@ -554,9 +559,11 @@ public:
         auto &obj = node->val_.o;
         auto &it = stateStack.top().objIt;
         if (it != obj->cend()) {
-          const auto child = &(it->second);
+          if (it->second.isInternalPtr()) {
+            const auto child = &(it->second);
+            stateStack.emplace(child);
+          }
           ++it;
-          stateStack.emplace(child);
         } else {
           delete obj;
           node->ty_ = {};
@@ -569,8 +576,8 @@ public:
         stateStack.pop();
         break;
       default:
-        node->ty_ = {};
-        stateStack.pop();
+        // should not reach here
+        break;
       }
     }
   }
@@ -730,6 +737,11 @@ public:
   }
 
   // Type and getter
+private:
+  bool isInternalPtr() const {
+    return ty_ == StrType_ || ty_ == ArrType_ || ty_ == ObjType_;
+  }
+
 public:
   JsonType type() const {
     constexpr JsonType types[]{JsonType::Null, JsonType::Bool, JsonType::Num,
@@ -1862,6 +1874,11 @@ inline JsonNode parseStreamJsonFile(const std::filesystem::path &filename,
 inline JsonNode parseStreamJsonFile(std::ifstream &is,
                                     bool *isComplete = nullptr) {
   return JsonParser{}.streamParse(is, isComplete);
+}
+
+inline std::ifstream &operator>>(std::ifstream &is, JsonNode &node) {
+  node = JsonParser{}.parse(is, true);
+  return is;
 }
 
 inline std::istream &operator>>(std::istream &is, JsonNode &node) {
