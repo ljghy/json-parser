@@ -166,12 +166,13 @@ public:
 
 JsonNode parseJsonString(std::string_view inputView, size_t *offset = nullptr);
 JsonNode parseJsonFile(const std::filesystem::path &filename, bool checkEnd = true);
-JsonNode parseJsonFile(std::istream &is, bool checkEnd = true);
+JsonNode parseJsonFile(std::ifstream &is, bool checkEnd = true);
 
 JsonNode parseStreamJsonString(std::string_view inputView, size_t *offset = nullptr, bool *isComplete = nullptr);
 JsonNode parseStreamJsonFile(const std::filesystem::path &filename, bool *isComplete = nullptr);
-JsonNode parseStreamJsonFile(std::istream &is, bool *isComplete = nullptr);
+JsonNode parseStreamJsonFile(std::ifstream &is, bool *isComplete = nullptr);
 
+std::istream &operator>>(std::ifstream &, JsonNode &);
 std::istream &operator>>(std::istream &, JsonNode &);
 std::ostream &operator<<(std::ostream &, const JsonNode &);
 std::ostream &operator<<(std::ostream &, JsonNode::Serializer &);
