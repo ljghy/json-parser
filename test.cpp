@@ -1,7 +1,6 @@
 #include "JsonParser.hpp"
 #include <filesystem>
 #include <iostream>
-#include <sstream>
 
 int main() {
   JsonNode json;
@@ -9,19 +8,16 @@ int main() {
 
   int totalTests = 0;
   int passedTests = 0;
-  for (const auto &dirEntry : std::filesystem::directory_iterator(dir)) {
+  for (const auto &path : std::filesystem::directory_iterator(dir)) {
     ++totalTests;
     std::stringstream ss;
-    ss << dirEntry;
     bool success = true;
-    std::string filename =
-        ss.str().substr(dir.size() + 1, ss.str().size() - dir.size() - 2);
-    std::string path = dir + filename;
     try {
       json = parseJsonFile(path);
     } catch (const std::exception &e) {
       success = false;
     }
+    std::string filename = path.path().filename().string();
     if ((success && filename[0] == 'n') || (!success && filename[0] == 'y')) {
       std::cerr << "Unexpected parsing result: " << filename << '\n';
     } else {
