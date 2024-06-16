@@ -1,6 +1,7 @@
 #ifndef JSON_PARSER_HPP_
 #define JSON_PARSER_HPP_
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -9,11 +10,8 @@
 #include <filesystem>
 #include <fstream>
 #include <initializer_list>
-#include <iomanip>
 #include <limits>
-#include <locale>
 #include <map>
-#include <sstream>
 #include <stack>
 #include <stdexcept>
 #include <string>
@@ -26,6 +24,7 @@
 #define JSON_PARSER_USE_FORMAT 1
 #else
 #define JSON_PARSER_USE_FORMAT 0
+#include <cstdio>
 #endif
 
 #if JSON_PARSER_USE_FORMAT
@@ -126,10 +125,17 @@ public:
   template <typename T> auto get(const std::string &key) const;
   template <typename T> auto get(const std::string &key, T &&fallback) const;
 
+  template <typename Derived> class JsonOutputStreamBase {
+  public:
+    void put(char);
+    void put(char, size_t);
+    void puts(const char *, size_t);
+  };
+
   class Serializer {
   public:
-    Serializer &precision(size_t);
-    Serializer &indent(size_t);
+    Serializer &precision(int);
+    Serializer &indent(int);
     Serializer &ascii(bool);
     Serializer &dump(std::ostream &);
     std::string dumps();
@@ -897,6 +903,106 @@ public:
 
   // serialization
 public:
+  template <typename Derived> class JsonOutputStreamBase;
+
+private:
+  template <size_t BufSize, typename Derived> class JsonStringRingBuffer {
+  public:
+    JsonStringRingBuffer(JsonOutputStreamBase<Derived> &os)
+        : m_os(os), m_pos(0) {}
+
+    ~JsonStringRingBuffer() {
+      if (m_pos)
+        dumpBuffer();
+    }
+
+    void put(char c) {
+      if (m_pos == BufSize)
+        dumpBuffer();
+      m_buf[m_pos++] = c;
+    }
+
+    void put(char c, size_t rep) {
+      size_t f = free();
+      while (rep > f) {
+        std::fill_n(m_buf + m_pos, f, c);
+        m_pos = BufSize;
+        dumpBuffer();
+        rep -= f;
+        f = BufSize;
+      }
+      std::fill_n(m_buf + m_pos, rep, c);
+      m_pos += rep;
+    }
+
+    void puts(const char *s, size_t n) {
+      size_t f = free();
+      while (n > f) {
+        std::copy_n(s, f, m_buf + m_pos);
+        m_pos = BufSize;
+        dumpBuffer();
+        s += f;
+        n -= f;
+        f = BufSize;
+      }
+      std::copy_n(s, n, m_buf + m_pos);
+      m_pos += n;
+    }
+
+  private:
+    void dumpBuffer() {
+      m_os.puts_(m_buf, m_pos);
+      m_pos = 0;
+    }
+    size_t free() const { return BufSize - m_pos; }
+
+  private:
+    JsonOutputStreamBase<Derived> &m_os;
+    char m_buf[BufSize];
+    size_t m_pos;
+  };
+
+public:
+  template <typename Derived> class JsonOutputStreamBase {
+    friend class JsonStringRingBuffer<256, Derived>;
+
+  public:
+    JsonOutputStreamBase() : m_buf(*this) {}
+
+    void put(char c) { m_buf.put(c); }
+    void put(char c, size_t rep) { m_buf.put(c, rep); }
+    void puts(const char *s, size_t n) { m_buf.puts(s, n); }
+
+  private:
+    void puts_(const char *s, size_t n) {
+      static_cast<Derived *>(this)->puts_(s, n);
+    }
+
+  private:
+    JsonStringRingBuffer<256, Derived> m_buf;
+  };
+
+  class JsonStringOutputStream
+      : public JsonOutputStreamBase<JsonStringOutputStream> {
+  public:
+    JsonStringOutputStream(std::string &str) : m_str(str) {}
+    void puts_(const char *s, size_t n) { m_str.append(s, n); }
+
+  private:
+    std::string &m_str;
+  };
+
+  class JsonFileOutputStream
+      : public JsonOutputStreamBase<JsonFileOutputStream> {
+  public:
+    JsonFileOutputStream(std::ostream &os) : m_os(os) {}
+    void puts_(const char *s, size_t n) { m_os.write(s, n); }
+
+  private:
+    std::ostream &m_os;
+  };
+
+public:
   class Serializer {
     friend class JsonNode;
 
@@ -906,12 +1012,12 @@ public:
     Serializer(const Serializer &) = delete;
     Serializer &operator=(const Serializer &) = delete;
 
-    Serializer &precision(size_t p) {
+    Serializer &precision(int p) {
       m_precision = p;
       return *this;
     }
 
-    Serializer &indent(size_t i) {
+    Serializer &indent(int i) {
       m_indent = i;
       return *this;
     }
@@ -921,27 +1027,9 @@ public:
       return *this;
     }
 
-    Serializer &dump(std::ostream &os) {
-#if !JSON_PARSER_USE_FORMAT
-      size_t prec = os.precision();
-      os.precision(m_precision == static_cast<size_t>(-1)
-                       ? std::numeric_limits<double>::max_digits10
-                       : m_precision);
-#endif
-      auto loc = os.getloc();
-      os.imbue(std::locale::classic());
-      char fill = os.fill();
-      os.fill(' ');
-
-#if JSON_PARSER_USE_FORMAT
-      const std::string floatingPointFormatString =
-          m_precision == static_cast<size_t>(-1)
-              ? "{}"
-              : "{:." + std::to_string(m_precision) + "}";
-#endif
-
-      bool formatted = (m_indent != static_cast<size_t>(-1));
-      const char *colon = formatted ? ": " : ":";
+    template <typename Derived>
+    Serializer &dump(JsonOutputStreamBase<Derived> &os) {
+      bool formatted = (m_indent != -1);
 
       std::stack<ConstTraverseState> stateStack;
       stateStack.emplace(&m_node);
@@ -950,101 +1038,102 @@ public:
         auto node = stateStack.top().node;
         switch (node->ty_) {
         case NullType_:
-          os << "null";
+          os.puts("null", 4);
           stateStack.pop();
           break;
         case BoolType_:
-          os << (node->val_.b ? "true" : "false");
+          node->val_.b ? os.puts("true", 4) : os.puts("false", 5);
           stateStack.pop();
           break;
         case DoubleType_:
-#if JSON_PARSER_USE_FORMAT
-          os << std::vformat(std::locale::classic(), floatingPointFormatString,
-                             std::make_format_args(node->val_.d));
-#else
-          os << node->val_.d;
-#endif
+          dumpDouble(os, node->val_.d, m_precision);
           stateStack.pop();
           break;
         case IntType_:
-          os << node->val_.i;
+          dumpInt64(os, node->val_.i);
           stateStack.pop();
           break;
         case UintType_:
-          os << node->val_.u;
+          dumpUint64(os, node->val_.u);
           stateStack.pop();
           break;
         case StrType_:
-          os << "\"";
-          toJsonString(os, *(node->val_.s), m_ascii);
-          os << "\"";
+          os.put('"');
+          dumpJsonString(os, *(node->val_.s), m_ascii);
+          os.put('"');
           stateStack.pop();
           break;
         case ArrType_: {
           const auto &arr = *node->val_.a;
           if (arr.empty()) {
-            os << "[]";
+            os.puts("[]", 2);
             stateStack.pop();
             break;
           }
           auto &it = stateStack.top().arrIt;
           if (it == arr.cbegin()) {
-            if (formatted)
-              os << "[\n" << std::setw(m_indent * stateStack.size()) << ' ';
-            else
-              os << '[';
+            os.put('[');
+            if (formatted) {
+              os.put('\n');
+              os.put(' ', m_indent * stateStack.size());
+            }
           } else if (it != arr.cend()) {
-            if (formatted)
-              os << ",\n" << std::setw(m_indent * stateStack.size()) << ' ';
-            else
-              os << ',';
+            os.put(',');
+            if (formatted) {
+              os.put('\n');
+              os.put(' ', m_indent * stateStack.size());
+            }
           }
           if (it != arr.cend()) {
             const auto child = &(*it);
             ++it;
             stateStack.emplace(child);
           } else {
-            if (formatted)
-              os << '\n'
-                 << std::string(m_indent * (stateStack.size() - 1), ' ') << ']';
-            else
-              os << ']';
+            if (formatted) {
+              os.put('\n');
+              os.put(' ', m_indent * (stateStack.size() - 1));
+            }
+            os.put(']');
             stateStack.pop();
           }
         } break;
         case ObjType_: {
           const auto &obj = *node->val_.o;
           if (obj.empty()) {
-            os << "{}";
+            os.puts("{}", 2);
             stateStack.pop();
             break;
           }
           auto &it = stateStack.top().objIt;
           if (it == obj.cbegin()) {
-            if (formatted)
-              os << "{\n" << std::setw(m_indent * stateStack.size()) << ' ';
-            else
-              os << '{';
+            os.put('{');
+            if (formatted) {
+              os.put('\n');
+              os.put(' ', m_indent * stateStack.size());
+            }
           } else if (it != obj.cend()) {
-            if (formatted)
-              os << ",\n" << std::setw(m_indent * stateStack.size()) << ' ';
-            else
-              os << ',';
+            os.put(',');
+            if (formatted) {
+              os.put('\n');
+              os.put(' ', m_indent * stateStack.size());
+            }
           }
 
           if (it != obj.cend()) {
-            os << '"';
-            toJsonString(os, it->first, m_ascii);
-            os << '"' << colon;
+            os.put('"');
+            dumpJsonString(os, it->first, m_ascii);
+            os.puts("\":", 2);
+            if (formatted)
+              os.put(' ');
             const auto child = &(it->second);
             ++it;
             stateStack.emplace(child);
           } else {
-            if (formatted)
-              os << '\n'
-                 << std::string(m_indent * (stateStack.size() - 1), ' ') << '}';
-            else
-              os << '}';
+            if (formatted) {
+              os.put('\n');
+              os.put(' ', m_indent * (stateStack.size() - 1));
+            }
+            os.put('}');
             stateStack.pop();
           }
         } break;
@@ -1053,56 +1142,93 @@ public:
           break;
         }
       }
-#if !JSON_PARSER_USE_FORMAT
-      os << std::setprecision(prec);
-#endif
-      os.imbue(loc);
-      os.fill(fill);
-
       return *this;
     }
 
     std::string dumps() {
-      std::ostringstream oss;
-      dump(oss);
-      return oss.str();
+      std::string str;
+      JsonStringOutputStream os(str);
+      dump(os);
+      return str;
     }
 
   private:
-    static void toJsonString(std::ostream &os, const JsonStr_t &src,
-                             bool ascii) {
+    template <typename Derived>
+    static void dumpInt64(JsonOutputStreamBase<Derived> &os, int64_t i) {
+      if (i < 0) {
+        os.put('-');
+        dumpUint64(os, -i);
+      } else {
+        dumpUint64(os, i);
+      }
+    }
+
+    template <typename Derived>
+    static void dumpUint64(JsonOutputStreamBase<Derived> &os, uint64_t u) {
+      char buf[20];
+      char *p = buf + 19;
+      while (u > 9) {
+        *p-- = '0' + u % 10;
+        u /= 10;
+      }
+      *p = '0' + u;
+      os.puts(p, buf + 20 - p);
+    }
+
+    template <typename Derived>
+    static void dumpDouble(JsonOutputStreamBase<Derived> &os, double d,
+                           int precision) {
+#if JSON_PARSER_USE_FORMAT
+      std::string num = precision != -1 ? std::format("{:.{}f}", d, precision)
+                                        : std::format("{}", d);
+      os.puts(num.c_str(), num.size());
+#else
+      if (precision == -1)
+        precision = std::numeric_limits<double>::max_digits10;
+      char buf[64];
+      int len = std::snprintf(buf, 64, "%.*g", precision, d);
+      os.puts(buf, len);
+#endif
+    }
+
+    template <typename Derived>
+    static void dumpJsonString(JsonOutputStreamBase<Derived> &os,
+                               const JsonStr_t &src, bool ascii) {
       for (auto ite = src.begin(); ite != src.end(); ++ite) {
         switch (*ite) {
         case '"':
         case '\\':
-          os << '\\' << *ite;
+          os.put('\\');
+          os.put(*ite);
           break;
         case '\b':
-          os << "\\b";
+          os.puts("\\b", 2);
           break;
         case '\f':
-          os << "\\f";
+          os.puts("\\f", 2);
           break;
         case '\n':
-          os << "\\n";
+          os.puts("\\n", 2);
           break;
         case '\r':
-          os << "\\r";
+          os.puts("\\r", 2);
           break;
         case '\t':
-          os << "\\t";
+          os.puts("\\t", 2);
           break;
         default: {
           if (ascii && *ite & 0x80)
             decodeUtf8(os, ite);
           else
-            os << *ite;
+            os.put(*ite);
         } break;
         }
       }
     }
 
-    static void decodeUtf8(std::ostream &os, std::string::const_iterator &ite) {
+    template <typename Derived>
+    static void decodeUtf8(JsonOutputStreamBase<Derived> &os,
+                           std::string::const_iterator &ite) {
       uint32_t u = 0;
       if (!(*ite & 0x20)) {
         u = ((*ite & 0x1F) << 6) | (*(ite + 1) & 0x3F);
@@ -1128,20 +1254,22 @@ public:
       toHex4(os, u);
     }
 
-    static void toHex4(std::ostream &os, uint32_t u) {
+    template <typename Derived>
+    static void toHex4(JsonOutputStreamBase<Derived> &os, uint32_t u) {
       char h[4];
       for (int i = 3; i >= 0; --i) {
         h[i] = u & 0xF;
         h[i] = h[i] < 10 ? (h[i] + '0') : (h[i] - 10 + 'a');
         u >>= 4;
       }
-      os << "\\u" << h[0] << h[1] << h[2] << h[3];
+      os.puts("\\u", 2);
+      os.puts(h, 4);
     }
 
   private:
     const JsonNode &m_node;
-    size_t m_precision = static_cast<size_t>(-1);
-    size_t m_indent = static_cast<size_t>(-1);
+    int m_precision = -1;
+    int m_indent = -1;
     bool m_ascii = true;
   };
 
@@ -1441,7 +1569,7 @@ inline JsonNode JsonParser::parse(std::string_view inputView, size_t *offset) {
 }
 
 inline JsonNode JsonParser::parse(std::ifstream &is, bool checkEnd) {
-  auto fileInputStream = JsonFileInputStream<64>(is);
+  auto fileInputStream = JsonFileInputStream<256>(is);
   return parse(fileInputStream, checkEnd);
 }
 
@@ -1461,7 +1589,7 @@ inline JsonNode JsonParser::streamParse(std::string_view inputView,
 }
 
 inline JsonNode JsonParser::streamParse(std::ifstream &is, bool *isComplete) {
-  auto fileInputStream = JsonFileInputStream<64>(is);
+  auto fileInputStream = JsonFileInputStream<256>(is);
   return streamParse(fileInputStream, isComplete);
 }
 
@@ -1888,12 +2016,14 @@ inline std::istream &operator>>(std::istream &is, JsonNode &node) {
 }
 
 inline std::ostream &operator<<(std::ostream &os, const JsonNode &node) {
-  node.serializer().dump(os);
+  JsonNode::JsonFileOutputStream fout(os);
+  node.serializer().dump(fout);
   return os;
 }
 
 inline std::ostream &operator<<(std::ostream &os, JsonNode::Serializer &s) {
-  s.dump(os);
+  JsonNode::JsonFileOutputStream fout(os);
+  s.dump(fout);
   return os;
 }
 
