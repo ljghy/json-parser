@@ -20,11 +20,16 @@
 #include <utility>
 #include <vector>
 
+#if __cplusplus >= 202002L
+#include <version>
+#endif
+
 #ifdef __cpp_lib_format
 #define JSON_PARSER_USE_FORMAT 1
 #else
 #define JSON_PARSER_USE_FORMAT 0
 #include <cstdio>
+#include <sstream>
 #endif
 
 #if JSON_PARSER_USE_FORMAT
@@ -365,7 +370,7 @@ private:
 public:
   JsonNode() = default;
 
-  JsonNode(JsonNull_t) : ty_(NullType_) {}
+  JsonNode(JsonNull_t) : ty_(NullType_), val_() {}
 
   JsonNode(bool b) : ty_(BoolType_) { val_.b = b; }
 
