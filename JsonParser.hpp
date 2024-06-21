@@ -304,7 +304,7 @@ private:
   struct has_subscript_op : std::false_type {};
   template <typename T>
   struct has_subscript_op<T,
-                          std::void_t<decltype(std::declval<T &>()[size_t{}])>>
+                          std::void_t<decltype(std::declval<T &>()[size_t{1}])>>
       : std::true_type {};
   template <typename T>
   static constexpr bool has_subscript_op_v = has_subscript_op<T>::value;
