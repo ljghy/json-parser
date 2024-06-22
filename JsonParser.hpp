@@ -1176,7 +1176,7 @@ public:
         *p-- = '0' + u % 10;
         u /= 10;
       }
-      *p = '0' + u;
+      *p = '0' + static_cast<char>(u);
       os.puts(p, buf + 20 - p);
     }
 
