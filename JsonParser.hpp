@@ -10,7 +10,6 @@
 #include <filesystem>
 #include <fstream>
 #include <initializer_list>
-#include <limits>
 #include <map>
 #include <stack>
 #include <stdexcept>
@@ -29,7 +28,6 @@
 #else
 #define JSON_PARSER_USE_FORMAT 0
 #include <cstdio>
-#include <sstream>
 #endif
 
 #if JSON_PARSER_USE_FORMAT
@@ -874,12 +872,7 @@ public:
 #if JSON_PARSER_USE_FORMAT
       return std::format("{}", val_.d);
 #else
-    {
-      std::stringstream ss;
-      ss.precision(std::numeric_limits<double>::max_digits10);
-      ss << val_.d;
-      return ss.str();
-    }
+      return std::to_string(val_.d);
 #endif
     case IntType_:
       return std::to_string(val_.i);
@@ -1188,10 +1181,9 @@ public:
                                         : std::format("{}", d);
       os.puts(num.c_str(), num.size());
 #else
-      if (precision == -1)
-        precision = std::numeric_limits<double>::max_digits10;
       char buf[64];
-      int len = std::snprintf(buf, 64, "%.*g", precision, d);
+      int len = precision >= 0 ? std::snprintf(buf, 64, "%.*g", precision, d)
+                               : std::snprintf(buf, 64, "%g", d);
       os.puts(buf, len);
 #endif
     }
