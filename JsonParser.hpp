@@ -83,9 +83,13 @@ public:
   template <typename NumberLike> JsonNode(NumberLike);
   JsonNode(std::nullptr_t);
   JsonNode(char);
+  template <size_t N> JsonNode(const char (&)[N]);
   JsonNode(const char *);
-  JsonNode(const std::initializer_list<JsonNode> &);
-  JsonNode(const std::initializer_list<std::pair<const JsonKeyLiteral_t, JsonNode>> &);
+  JsonNode(std::string_view);
+  JsonNode(std::initializer_list<JsonNode>);
+  JsonNode(std::initializer_list<std::pair<const JsonKeyLiteral_t, JsonNode>>);
+  JsonNode(const ArrayLike &, const size_t n, size_t offset, stride);
+  JsonNode(const MapLike &);
 
   JsonNode(const JsonNode &);
   JsonNode(JsonNode &&) noexcept;
@@ -457,14 +461,25 @@ public:
 
   JsonNode(char c) : ty_(StrType_) { val_.s = new JsonStr_t(1, c); }
 
-  JsonNode(const char *str) : ty_(StrType_) { val_.s = new JsonStr_t(str); }
+  template <size_t N> JsonNode(const char (&str)[N]) : ty_(StrType_) {
+    val_.s = new JsonStr_t(str, N > 0 ? N - 1 : 0);
+  }
 
-  JsonNode(const std::initializer_list<JsonNode> &arr) : ty_(ArrType_) {
+  template <typename T,
+            typename std::enable_if_t<std::is_same_v<T, const char *>, int> = 0>
+  JsonNode(T str) : ty_(StrType_) {
+    val_.s = new JsonStr_t(str);
+  }
+
+  JsonNode(std::string_view str) : ty_(StrType_) {
+    val_.s = new JsonStr_t(str.begin(), str.end());
+  }
+
+  JsonNode(std::initializer_list<JsonNode> arr) : ty_(ArrType_) {
     val_.a = new JsonArr_t(arr);
   }
   JsonNode(
-      const std::initializer_list<std::pair<const JsonKeyLiteral_t, JsonNode>>
-          &obj)
+      std::initializer_list<std::pair<const JsonKeyLiteral_t, JsonNode>> obj)
       : ty_(ObjType_) {
     val_.o = new JsonObj_t{};
     for (const auto &p : obj) {
@@ -1261,7 +1276,16 @@ public:
           os.puts("\\t", 2);
           break;
         default: {
-          if (ascii && *ite & 0x80)
+          if (static_cast<unsigned char>(*ite) < 0x20u) {
+            const char escaped[]{
+                '\\',
+                'u',
+                '0',
+                '0',
+                char('0' + *ite / 16),
+                char(*ite % 16 + ((*ite % 16) > 9 ? 'a' - 10 : '0'))};
+            os.puts(escaped, 6);
+          } else if (ascii && *ite & 0x80)
             decodeUtf8(os, ite);
           else
             os.put(*ite);
