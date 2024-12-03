@@ -19,19 +19,29 @@
 #include <utility>
 #include <vector>
 
+#ifdef JSON_PARSER_USE_LIBFMT
+
+#include <fmt/format.h>
+
+#else
+
 #if __cplusplus >= 202002L
 #include <version>
 #endif
 
 #ifdef __cpp_lib_format
-#define JSON_PARSER_USE_FORMAT 1
+#ifndef JSON_PARSER_USE_STD_FORMAT
+#define JSON_PARSER_USE_STD_FORMAT
+#endif
+#include <format>
 #else
-#define JSON_PARSER_USE_FORMAT 0
 #include <cstdio>
 #endif
 
-#if JSON_PARSER_USE_FORMAT
-#include <format>
+#endif
+
+#ifndef JSON_PARSER_IO_BUFFER_SIZE
+#define JSON_PARSER_IO_BUFFER_SIZE 1024
 #endif
 
 /*
@@ -52,6 +62,12 @@ struct JsonKeyLiteral_t {
 
 JsonKeyLiteral_t operator""_key(const char *key, size_t len);
 
+class JsonParserLocaleGuard {
+public:
+  JsonParserLocaleGuard();
+  ~JsonParserLocaleGuard();
+};
+
 class JsonNode {
 public:
   JsonNode();
@@ -60,6 +76,7 @@ public:
   JsonNode(const JsonStr_t &);
   JsonNode(JsonStr_t &&);
   JsonNode(const JsonArr_t &);
+  JsonNode(const std::filesystem::path &);
   JsonNode(JsonArr_t &&);
   JsonNode(const JsonObj_t &);
   JsonNode(JsonObj_t &&);
@@ -246,6 +263,21 @@ inline const char *getJsonErrorMsg(JsonErrorCode code) {
 }
 }; // namespace detail
 
+// If the locale is not "C", the parser may fail to parse floating-point numbers
+// and the serializer may produce non-standard JSON strings. This class is used
+// to temporarily set the locale to "C" during parsing and serialization with
+// RAII (not thread-safe).
+class JsonParserLocaleGuard {
+public:
+  JsonParserLocaleGuard() : m_backup(std::locale()) {
+    std::locale::global(std::locale::classic());
+  }
+  ~JsonParserLocaleGuard() { std::locale::global(m_backup); }
+
+private:
+  std::locale m_backup;
+};
+
 class JsonNode {
   friend class JsonParser;
 
@@ -378,6 +410,15 @@ public:
 
   JsonNode(JsonStr_t &&str) : ty_(StrType_) {
     val_.s = new JsonStr_t(std::move(str));
+  }
+
+  JsonNode(const std::filesystem::path &path) : ty_(StrType_) {
+#if __cplusplus >= 202002L
+    auto u8path = path.u8string();
+    val_.s = new JsonStr_t(u8path.begin(), u8path.end());
+#else
+    val_.s = new JsonStr_t(path.u8string());
+#endif
   }
 
   JsonNode(const JsonArr_t &arr) : ty_(ArrType_) {
@@ -869,8 +910,10 @@ public:
     case BoolType_:
       return val_.b ? "true" : "false";
     case DoubleType_:
-#if JSON_PARSER_USE_FORMAT
+#ifdef JSON_PARSER_USE_STD_FORMAT
       return std::format("{}", val_.d);
+#elif defined(JSON_PARSER_USE_LIBFMT)
+      return fmt::format("{}", val_.d);
 #else
       return std::to_string(val_.d);
 #endif
@@ -962,7 +1005,7 @@ private:
 
 public:
   template <typename Derived> class JsonOutputStreamBase {
-    friend class JsonStringRingBuffer<256, Derived>;
+    friend class JsonStringRingBuffer<JSON_PARSER_IO_BUFFER_SIZE, Derived>;
 
   public:
     JsonOutputStreamBase() : m_buf(*this) {}
@@ -977,7 +1020,7 @@ public:
     }
 
   private:
-    JsonStringRingBuffer<256, Derived> m_buf;
+    JsonStringRingBuffer<JSON_PARSER_IO_BUFFER_SIZE, Derived> m_buf;
   };
 
   class JsonStringOutputStream
@@ -1176,9 +1219,13 @@ public:
     template <typename Derived>
     static void dumpDouble(JsonOutputStreamBase<Derived> &os, double d,
                            int precision) {
-#if JSON_PARSER_USE_FORMAT
+#ifdef JSON_PARSER_USE_STD_FORMAT
       std::string num = precision != -1 ? std::format("{:.{}f}", d, precision)
                                         : std::format("{}", d);
+      os.puts(num.c_str(), num.size());
+#elif defined(JSON_PARSER_USE_LIBFMT)
+      std::string num = precision != -1 ? fmt::format("{:.{}f}", d, precision)
+                                        : fmt::format("{}", d);
       os.puts(num.c_str(), num.size());
 #else
       char buf[64];
@@ -1566,7 +1613,7 @@ inline JsonNode JsonParser::parse(std::string_view inputView, size_t *offset) {
 }
 
 inline JsonNode JsonParser::parse(std::ifstream &is, bool checkEnd) {
-  auto fileInputStream = JsonFileInputStream<256>(is);
+  auto fileInputStream = JsonFileInputStream<JSON_PARSER_IO_BUFFER_SIZE>(is);
   return parse(fileInputStream, checkEnd);
 }
 
@@ -1586,7 +1633,7 @@ inline JsonNode JsonParser::streamParse(std::string_view inputView,
 }
 
 inline JsonNode JsonParser::streamParse(std::ifstream &is, bool *isComplete) {
-  auto fileInputStream = JsonFileInputStream<256>(is);
+  auto fileInputStream = JsonFileInputStream<JSON_PARSER_IO_BUFFER_SIZE>(is);
   return streamParse(fileInputStream, isComplete);
 }
 
@@ -2003,12 +2050,12 @@ inline JsonNode parseStreamJsonFile(std::ifstream &is,
 }
 
 inline std::ifstream &operator>>(std::ifstream &is, JsonNode &node) {
-  node = JsonParser{}.parse(is, true);
+  node = std::move(JsonParser{}.parse(is, true));
   return is;
 }
 
 inline std::istream &operator>>(std::istream &is, JsonNode &node) {
-  node = JsonParser{}.parse(is, true);
+  node = std::move(JsonParser{}.parse(is, true));
   return is;
 }
 
